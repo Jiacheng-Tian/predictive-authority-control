@@ -1,0 +1,43 @@
+{
+  "steps": 2100,
+  "scenarios": [
+    1,
+    2,
+    3
+  ],
+  "seeds": [
+    20000,
+    20001,
+    20002,
+    20003,
+    20004,
+    20005,
+    20006,
+    20007,
+    20008,
+    20009
+  ],
+  "base_controllers": [
+    "real10kg_smc_steady",
+    "real10kg_mpc_event"
+  ],
+  "current_amplitude_scales": [
+    2.5
+  ],
+  "current_frequency_scales": [
+    1.0
+  ],
+  "initial_position_std": 0.03,
+  "initial_velocity_std": 0.01,
+  "vertical_current": 0.75,
+  "vehicle_profile": "real_10kg_v1",
+  "action_mode": "thruster",
+  "thruster_layout": "real_10kg_x",
+  "start_times": [
+    0.0
+  ],
+  "mass_scale_xy": 1.0,
+  "damping_scale_xy": 1.0,
+  "reference_controller": "real10kg_smc_steady",
+  "trajectory3d": true
+}

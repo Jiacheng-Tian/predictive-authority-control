@@ -1,0 +1,2 @@
+method,rmse,post_startup_rmse,tail_rmse,mean_error,max_error,energy,z_rmse,authority_active_fraction,authority_alpha_mean,authority_alpha_std,action_saturation_step_fraction,action_tv_mean,action_jerk_mean,alpha_raw_mean,alpha_uncertainty_std,rmse_gain_pct,post_startup_gain_pct
+predictive_alpha,0.09239103081516602,0.08593195278288263,0.10210672852082424,0.08198336308881048,0.3033328673827806,31.98917053021937,0.014503068465026301,1.0,0.223474706105693,0.24756870026245847,0.13006349206349208,0.019614493401206898,0.003558991414806767,0.19954682013597005,0.0,,

@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.tmp
+*.log
+*.lock
+REPOSITORY_VERIFICATION.json
+REPOSITORY_VERIFICATION_CHECKS.csv
+dist/
