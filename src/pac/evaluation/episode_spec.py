@@ -13,14 +13,10 @@ _MAX_SEED = 2**64 - 1
 
 
 def _integer(value, name: str, *, minimum: int = 0) -> int:
-    if isinstance(value, (bool, np.bool_)):
+    if isinstance(value, (bool, np.bool_)) or not isinstance(
+            value, (int, np.integer)):
         raise ValueError(f"{name} must be an integer")
-    try:
-        integer = int(value)
-    except (TypeError, ValueError, OverflowError) as exc:
-        raise ValueError(f"{name} must be an integer") from exc
-    if integer != value:
-        raise ValueError(f"{name} must be an integer")
+    integer = int(value)
     if integer < minimum:
         raise ValueError(f"{name} must be >= {minimum}")
     return integer

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 
+import numpy as np
 
 _MAX_SEED = 2**64 - 1
 
@@ -35,4 +36,18 @@ def validate_disjoint_seed_partitions(
 
 def episode_uid(scenario_id: int, episode_seed: int) -> str:
     """Return a stable environment episode identity independent of model seeds."""
-    return f"scn{scenario_id}_env{episode_seed}"
+    if isinstance(scenario_id, (bool, np.bool_)) or not isinstance(
+            scenario_id, (int, np.integer)):
+        raise ValueError("scenario_id must be a positive integer")
+    scenario = int(scenario_id)
+    if scenario <= 0:
+        raise ValueError("scenario_id must be a positive integer")
+    if isinstance(episode_seed, (bool, np.bool_)) or not isinstance(
+            episode_seed, (int, np.integer)):
+        raise ValueError("episode_seed must be a non-negative integer")
+    seed = int(episode_seed)
+    if seed < 0:
+        raise ValueError("episode_seed must be a non-negative integer")
+    if seed > _MAX_SEED:
+        raise ValueError("episode_seed exceeds uint64 maximum")
+    return f"scn{scenario}_env{seed}"

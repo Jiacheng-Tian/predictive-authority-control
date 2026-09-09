@@ -41,6 +41,32 @@ class EpisodePairingTest(unittest.TestCase):
         self.assertTrue(all(row["model_seed"] is None for row in baseline))
         self.assertTrue(all(row["episode_uid"] == "scn1_env41000" for row in rows))
 
+    def test_paired_grid_accepts_zero_seeds_and_positive_scenarios(self):
+        from pac.evaluation.protocol import build_paired_evaluation_grid
+
+        rows = build_paired_evaluation_grid(
+            model_seeds=[0], episode_seeds=[1], scenarios=[4]
+        )
+        self.assertEqual({row["model_seed"] for row in rows if row["row_type"] == "learned"}, {0})
+        self.assertEqual({row["episode_seed"] for row in rows}, {1})
+        self.assertEqual({row["scenario_id"] for row in rows}, {4})
+        self.assertEqual({row["episode_uid"] for row in rows}, {"scn4_env1"})
+        with self.assertRaises(ValueError):
+            build_paired_evaluation_grid(model_seeds=[-1], episode_seeds=[1], scenarios=[1])
+        with self.assertRaises(ValueError):
+            build_paired_evaluation_grid(model_seeds=[0], episode_seeds=[-1], scenarios=[1])
+
+    def test_episode_spec_rejects_float_integer_fields(self):
+        from pac.evaluation.episode_spec import build_episode_spec
+
+        common = dict(scenario_id=1, episode_seed=0, steps=2, dt=0.01)
+        with self.assertRaises(ValueError):
+            build_episode_spec(**{**common, "episode_seed": 0.0})
+        with self.assertRaises(ValueError):
+            build_episode_spec(**{**common, "steps": np.float64(2.0)})
+        with self.assertRaises(ValueError):
+            build_episode_spec(**{**common, "scenario_id": True})
+
     def test_simulator_reset_accepts_spec_without_resampling(self):
         from pac.evaluation.episode_spec import build_episode_spec
         from pac.simulation.core import AUVSimulator

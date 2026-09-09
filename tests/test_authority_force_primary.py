@@ -64,6 +64,8 @@ class AuthorityForcePrimaryTest(unittest.TestCase):
         self.assertEqual(metrics["authority_forced_primary_fraction"], 1.0)
         self.assertEqual(metrics["ts"]["authority_forced_primary"].tolist(), [True])
         self.assertEqual(metrics["ts"]["authority_alpha"].tolist(), [0.0])
+        self.assertEqual(metrics["ts"]["time"].tolist(), [0.0])
+        self.assertEqual(metrics["ts"]["sample_time"].tolist(), [0.01])
 
 
 if __name__ == "__main__":

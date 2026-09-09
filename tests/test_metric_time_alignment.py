@@ -9,6 +9,22 @@ from unittest.mock import patch
 
 
 class MetricTimeAlignmentTest(unittest.TestCase):
+    def test_legacy_fixed_preserves_time_schema_and_adds_post_step_sample_time(self):
+        from pac.evaluation.episodes import run_fixed_controller_episode
+
+        metrics = run_fixed_controller_episode(
+            scenario=1,
+            seed=0,
+            steps=2,
+            mass_scale_xy=1.0,
+            damping_scale_xy=1.0,
+            base_controller="real10kg_smc_steady",
+            save_ts=True,
+        )
+        ts = metrics["ts"]
+        self.assertNotIn("time", ts)
+        self.assertEqual(ts["sample_time"].tolist(), [0.01, 0.02])
+
     def test_engineering_metrics_use_applied_action_columns(self):
         from pac.evaluation.metrics import compute_timeseries_engineering_metrics
 

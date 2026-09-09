@@ -152,6 +152,7 @@ def run_predictive_alpha_episode(
     true_currents, estimated_currents = [], []
     amplitude_clipped_fractions, rate_limited_fractions = [], []
     headings, desired_headings, steps_out, times = [], [], [], []
+    sample_times = []
     target_states = []
     rolls, pitches, desired_rolls, desired_pitches = [], [], [], []
     xs, ys, zs, target_zs, z_errors = [], [], [], [], []
@@ -251,6 +252,7 @@ def run_predictive_alpha_episode(
             row_time = t
         steps_out.append(pre_step)
         times.append(float(row_time))
+        sample_times.append(sample_time)
         rolls.append(float(row_eta[3]))
         pitches.append(float(row_eta[4]))
         headings.append(float(row_eta[5]))
@@ -328,7 +330,7 @@ def run_predictive_alpha_episode(
     timeseries = pd.DataFrame({
         "step": steps_out,
         "time": times,
-        "sample_time": times,
+        "sample_time": sample_times,
         "error": errors,
         "energy": energies,
         "roll": rolls,

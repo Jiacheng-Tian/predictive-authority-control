@@ -11,6 +11,11 @@ class SeedSchemaTest(unittest.TestCase):
         self.assertEqual(episode_uid(3, 41007), episode_uid(3, 41007))
         self.assertNotEqual(episode_uid(4, 41007), episode_uid(3, 41007))
         self.assertNotEqual(episode_uid(3, 41008), episode_uid(3, 41007))
+        self.assertEqual(episode_uid(3, 0), "scn3_env0")
+        with self.assertRaises(ValueError):
+            episode_uid(3, -1)
+        with self.assertRaises(ValueError):
+            episode_uid(0, 41007)
 
     def test_episode_uid_has_no_model_seed_parameter(self):
         from inspect import signature

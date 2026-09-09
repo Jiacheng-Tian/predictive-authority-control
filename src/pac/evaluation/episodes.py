@@ -81,11 +81,13 @@ def make_timeseries(
         true_currents=None,
         estimated_currents=None,
         amplitude_clipped_fractions=None,
-        rate_limited_fractions=None) -> dict:
+        rate_limited_fractions=None,
+        sample_times=None) -> dict:
     out = {"step": steps, "error": errors, "energy": energies, "heading": headings, "desired_heading": desired_headings, "x": xs, "y": ys}
     if times is not None:
         out["time"] = times
-        out["sample_time"] = times
+    if sample_times is not None:
+        out["sample_time"] = sample_times
     out["yaw"] = headings
     out["desired_yaw"] = desired_headings
     if rolls is not None:
@@ -260,7 +262,7 @@ def run_fixed_controller_episode(
             row_heading = float(dyn.eta[5])
             row_desired_heading = float(desired_heading(t))
         step_rows.append(int(env.current_step - 1))
-        sample_times.append(sample_time if aligned else t)
+        sample_times.append(sample_time)
         rolls.append(float(row_eta[3]))
         pitches.append(float(row_eta[4]))
         headings.append(row_heading)
@@ -325,7 +327,8 @@ def run_fixed_controller_episode(
         zs=zs,
         target_zs=target_zs,
         z_errors=z_errors,
-        times=sample_times,
+        times=sample_times if aligned else None,
+        sample_times=sample_times,
         requested_actions=requested_actions,
         applied_actions=actions,
         true_currents=true_currents,
