@@ -29,6 +29,14 @@ METADATA_COLUMNS = (
     "oracle_worst",
     "episode_fingerprint",
 )
+_METADATA_STRING_COLUMNS = {"split", "episode_uid", "episode_fingerprint"}
+_METADATA_INTEGER_COLUMNS = {"scenario", "environment_seed", "step"}
+_METADATA_FLOAT_COLUMNS = {
+    "sample_time",
+    "teacher_alpha",
+    "oracle_best",
+    "oracle_worst",
+}
 
 
 def _json_value(value: Any) -> Any:
@@ -71,6 +79,48 @@ def _canonical_json(value: Any) -> bytes:
     ).encode("utf-8")
 
 
+def canonical_config_hash(config: Any) -> str:
+    """Hash a config's canonical JSON rather than its source-file bytes."""
+    return hashlib.sha256(_canonical_json(config)).hexdigest()
+
+
+def _actual_seed_partitions(metadata: pd.DataFrame) -> dict[str, list[int]]:
+    result: dict[str, list[int]] = {}
+    for split in ("train", "val"):
+        values = metadata.loc[metadata["split"] == split, "environment_seed"]
+        result[split] = sorted({int(value) for value in values.tolist()})
+    return result
+
+
+def _semantic_provenance(provenance: Any | None) -> dict[str, Any]:
+    """Keep only portable, data-semantic provenance in the dataset hash."""
+    source = provenance if isinstance(provenance, dict) else {}
+    config_value = source.get("config_json", source.get("config"))
+    config_hash = source.get("config_json_sha256")
+    if config_value is not None:
+        config_hash = canonical_config_hash(config_value)
+    if config_hash is None:
+        config_hash = source.get("config_hash")
+    actual_seeds = source.get(
+        "actual_seed_partitions",
+        source.get("seed_partitions", {}),
+    )
+    normalized_seeds = {
+        str(split): sorted({int(seed) for seed in seeds})
+        for split, seeds in dict(actual_seeds).items()
+    }
+    oracle = source.get("oracle_settings", source.get("oracle", {}))
+    return {
+        "protocol_version": source.get(
+            "protocol_version", source.get("protocol", "")
+        ),
+        "config_json_sha256": config_hash,
+        "actual_seed_partitions": normalized_seeds,
+        "oracle_settings": oracle,
+        "profile": str(source.get("profile", "")),
+    }
+
+
 def _validate_metadata(metadata: pd.DataFrame, length: int) -> pd.DataFrame:
     if not isinstance(metadata, pd.DataFrame):
         raise TypeError("metadata must be a pandas DataFrame")
@@ -78,6 +128,8 @@ def _validate_metadata(metadata: pd.DataFrame, length: int) -> pd.DataFrame:
         raise ValueError("metadata length must match features and labels")
     if metadata.columns.has_duplicates:
         raise ValueError("metadata columns must be unique")
+    if any(not isinstance(column, str) for column in metadata.columns):
+        raise ValueError("metadata column names must be strings")
     missing = [column for column in METADATA_COLUMNS if column not in metadata.columns]
     if missing:
         raise ValueError(f"metadata is missing required columns: {', '.join(missing)}")
@@ -97,6 +149,26 @@ def _validate_metadata(metadata: pd.DataFrame, length: int) -> pd.DataFrame:
             if not np.isfinite(numeric).all():
                 raise ValueError(f"metadata column {column} must contain finite values")
     return metadata.copy(deep=True)
+
+
+def _metadata_csv_dtypes(metadata: pd.DataFrame | None = None) -> dict[str, str]:
+    columns = set(metadata.columns) if metadata is not None else set(METADATA_COLUMNS)
+    dtypes: dict[str, str] = {}
+    for column in columns & _METADATA_STRING_COLUMNS:
+        dtypes[column] = "string"
+    for column in columns & _METADATA_INTEGER_COLUMNS:
+        dtypes[column] = "int64"
+    for column in columns & _METADATA_FLOAT_COLUMNS:
+        dtypes[column] = "float64"
+    return dtypes
+
+
+def _read_metadata_csv(path: Path) -> pd.DataFrame:
+    return pd.read_csv(
+        path,
+        dtype=_metadata_csv_dtypes(),
+        keep_default_na=False,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -205,25 +277,50 @@ def split_indices_by_episode(metadata: pd.DataFrame) -> dict[str, np.ndarray]:
 
 
 def _canonical_metadata(metadata: pd.DataFrame) -> bytes:
-    columns = sorted(str(column) for column in metadata.columns)
+    columns = [*METADATA_COLUMNS, *sorted(
+        str(column) for column in metadata.columns if column not in METADATA_COLUMNS
+    )]
+
+    def cell(column: str, value: Any) -> dict[str, str]:
+        if column in _METADATA_STRING_COLUMNS:
+            return {"type": "string", "value": str(value)}
+        if column in _METADATA_INTEGER_COLUMNS:
+            return {"type": "int64", "value": str(int(value))}
+        if column in _METADATA_FLOAT_COLUMNS:
+            return {"type": "float64", "value": float(value).hex()}
+        if isinstance(value, (bool, np.bool_)):
+            return {"type": "bool", "value": str(bool(value))}
+        if isinstance(value, (int, np.integer)):
+            return {"type": "int64", "value": str(int(value))}
+        if isinstance(value, (float, np.floating)):
+            return {"type": "float64", "value": float(value).hex()}
+        return {"type": "string", "value": str(value)}
+
     records = []
-    for _, row in metadata.loc[:, columns].iterrows():
-        records.append(_canonical_json({column: row[column] for column in columns}).decode("utf-8"))
+    for index in range(len(metadata)):
+        record = {
+            column: cell(column, metadata[column].iloc[index])
+            for column in columns
+        }
+        records.append(_canonical_json(record).decode("utf-8"))
     records.sort()
     return _canonical_json({"columns": columns, "rows": records})
 
 
 def canonical_dataset_hash(dataset: OracleDataset, provenance: Any | None = None) -> str:
-    """Hash arrays, sorted metadata content, and oracle/config provenance."""
+    """Hash portable arrays, sorted metadata content, and semantic provenance."""
     dataset = dataset if isinstance(dataset, OracleDataset) else OracleDataset(**dataset)
     digest = hashlib.sha256()
     digest.update(b"pac-oracle-dataset-v1\0")
     for array in (dataset.features, dataset.labels):
-        digest.update(str(array.dtype).encode("ascii"))
+        digest.update(b"float32-little-endian")
         digest.update(_canonical_json(list(array.shape)))
-        digest.update(np.ascontiguousarray(array).tobytes())
+        canonical = np.ascontiguousarray(
+            np.asarray(array, dtype=np.float32).astype("<f4", copy=False)
+        )
+        digest.update(canonical.tobytes())
     digest.update(_canonical_metadata(dataset.metadata))
-    digest.update(_canonical_json({"provenance": provenance or {}}))
+    digest.update(_canonical_json(_semantic_provenance(provenance)))
     return digest.hexdigest()
 
 
@@ -270,6 +367,14 @@ def save_oracle_dataset(
         raise FileExistsError(f"output directory is not empty: {target}")
     target.parent.mkdir(parents=True, exist_ok=True)
     source_provenance = dict(provenance or {})
+    actual_seed_partitions = _actual_seed_partitions(dataset.metadata)
+    configured_seed_partitions = source_provenance.get(
+        "configured_seed_partitions",
+        source_provenance.get("seed_partitions", {}),
+    )
+    source_provenance["actual_seed_partitions"] = actual_seed_partitions
+    source_provenance["configured_seed_partitions"] = configured_seed_partitions
+    source_provenance["seed_partitions"] = actual_seed_partitions
     dataset_hash = canonical_dataset_hash(dataset, source_provenance)
     config_hash = source_provenance.get("config_hash")
     if config_hash is None and "config" in source_provenance:
@@ -284,8 +389,9 @@ def save_oracle_dataset(
         "dependency_versions": source_provenance.get(
             "dependency_versions", _default_dependency_versions()
         ),
-        "seed_partitions": source_provenance.get("seed_partitions", {}),
-        "provenance": source_provenance,
+        "seed_partitions": actual_seed_partitions,
+        "configured_seed_partitions": configured_seed_partitions,
+        "provenance": _json_value(source_provenance),
     }
     temp_dir = Path(tempfile.mkdtemp(prefix=f".{target.name}.tmp-", dir=str(target.parent)))
     try:
@@ -296,7 +402,7 @@ def save_oracle_dataset(
         )
         # Hash exactly what a later load observes on disk, while retaining the
         # original NPY bytes and dtypes.
-        disk_metadata = pd.read_csv(temp_dir / "metadata.csv")
+        disk_metadata = _read_metadata_csv(temp_dir / "metadata.csv")
         disk_dataset = OracleDataset(dataset.features, dataset.labels, disk_metadata)
         assert_episode_split_disjoint(disk_dataset.metadata)
         assert_unique_episode_fingerprints(disk_dataset.metadata)
@@ -344,7 +450,7 @@ def load_oracle_dataset(out_dir: str | Path) -> OracleDataset:
         dataset = OracleDataset(
             np.load(root / "features.npy", allow_pickle=False),
             np.load(root / "labels.npy", allow_pickle=False),
-            pd.read_csv(root / "metadata.csv"),
+            _read_metadata_csv(root / "metadata.csv"),
         )
     except (OSError, ValueError, TypeError) as exc:
         raise ValueError("invalid oracle dataset content") from exc
@@ -364,6 +470,7 @@ __all__ = [
     "OracleDataset",
     "assert_episode_split_disjoint",
     "assert_unique_episode_fingerprints",
+    "canonical_config_hash",
     "canonical_dataset_hash",
     "episode_fingerprint",
     "load_oracle_dataset",

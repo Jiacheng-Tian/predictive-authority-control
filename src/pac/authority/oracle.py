@@ -7,6 +7,7 @@ was already computed for the real controller step.
 
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass
 import math
 from typing import Any, Callable
@@ -411,8 +412,27 @@ def choose_rollout_oracle_alpha(
 
     costs: list[float] = []
     candidate_alphas = tuple(oracle.alpha_grid)
+    primary_clones = []
+    for _alpha in candidate_alphas:
+        try:
+            clone = copy.deepcopy(primary_controller)
+        except Exception as exc:
+            raise RuntimeError(
+                "primary_controller deepcopy failed; rollout oracle made no primary calls"
+            ) from exc
+        try:
+            reset = getattr(clone, "reset", None)
+            if callable(reset):
+                reset()
+            set_trajectory = getattr(clone, "set_trajectory3d", None)
+            if callable(set_trajectory):
+                set_trajectory(True)
+        except Exception as exc:
+            raise RuntimeError("primary_controller clone initialization failed") from exc
+        primary_clones.append(clone)
     try:
-        for alpha in candidate_alphas:
+        for candidate_index, alpha in enumerate(candidate_alphas):
+            primary_clone = primary_clones[candidate_index]
             eta = eta0.copy()
             nu = nu0.copy()
             private_actuator = SharedActuator(limits)
@@ -423,7 +443,7 @@ def choose_rollout_oracle_alpha(
                 current = _current_vector(current_at(current_time))
                 target = _finite_vector(target_at(current_time), (6,), "rollout target")
                 primary_action = _controller_action(
-                    primary_controller, target, eta, nu, current_time, current
+                    primary_clone, target, eta, nu, current_time, current
                 )
                 authority_action = plan[min(step, plan.shape[0] - 1)]
                 requested = (1.0 - float(alpha)) * primary_action + float(alpha) * authority_action

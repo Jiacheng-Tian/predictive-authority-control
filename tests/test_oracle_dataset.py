@@ -96,6 +96,54 @@ class OracleDatasetTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             assert_unique_episode_fingerprints(pd.DataFrame({"episode_fingerprint": ["a", "a"]}))
 
+    def test_content_hash_is_portable_and_manifest_distinguishes_actual_seeds(self):
+        from pac.authority.dataset import canonical_dataset_hash, save_oracle_dataset
+
+        first = _dataset()
+        reordered = first.metadata.loc[::-1, list(reversed(first.metadata.columns))].reset_index(drop=True)
+        second = type(first)(
+            np.ascontiguousarray(first.features.astype(">f4")),
+            np.asfortranarray(first.labels.astype("<f4")),
+            reordered,
+        )
+        semantic = {
+            "protocol_version": "formal_true_mpc_v3",
+            "config_hash": "config-semantic-sha",
+            "actual_seed_partitions": {"train": [1], "val": [2]},
+            "oracle_settings": {"horizon": 20, "alpha_grid": [0.0, 1.0]},
+            "profile": "short",
+            "config_source": "first-root/config/pac_v3.yaml",
+            "git_commit": "first",
+            "dependency_versions": {"numpy": "one"},
+        }
+        changed_paths = dict(semantic)
+        changed_paths.update({
+            "config_source": "second-root/config/pac_v3.yaml",
+            "git_commit": "second",
+            "dependency_versions": {"numpy": "two"},
+        })
+        self.assertEqual(canonical_dataset_hash(first, semantic), canonical_dataset_hash(second, changed_paths))
+        with tempfile.TemporaryDirectory() as temp_dir:
+            manifest = save_oracle_dataset(
+                first,
+                Path(temp_dir) / "oracle",
+                {**semantic, "configured_seed_partitions": {"train": [1, 2], "val": [3]}},
+            )
+            self.assertEqual(manifest["seed_partitions"], {"train": [1], "val": [2]})
+            self.assertEqual(manifest["configured_seed_partitions"], {"train": [1, 2], "val": [3]})
+
+    def test_numeric_episode_uid_roundtrips_as_string(self):
+        from pac.authority.dataset import load_oracle_dataset, save_oracle_dataset
+
+        dataset = _dataset()
+        dataset.metadata["episode_uid"] = ["001", "002"]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output = Path(temp_dir) / "oracle"
+            save_oracle_dataset(dataset, output, {})
+            loaded = load_oracle_dataset(output)
+            self.assertEqual(loaded.metadata["episode_uid"].tolist(), ["001", "002"])
+            self.assertEqual(str(loaded.metadata["episode_uid"].dtype), "string")
+
 
 if __name__ == "__main__":
     unittest.main()

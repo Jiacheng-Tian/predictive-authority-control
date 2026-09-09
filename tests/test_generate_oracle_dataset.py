@@ -12,6 +12,13 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class GenerateOracleDatasetTest(unittest.TestCase):
+    def test_profile_normalization_maps_blank_and_whitespace_to_short(self):
+        from pac.authority.training import normalize_oracle_profile
+
+        self.assertEqual(normalize_oracle_profile(""), "short")
+        self.assertEqual(normalize_oracle_profile("  SHORT  "), "short")
+        self.assertEqual(normalize_oracle_profile(" formal "), "formal")
+
     def test_dry_prints_plan_without_writing(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             output = Path(temp_dir) / "dry"

@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import asdict
-import hashlib
 import json
 from pathlib import Path
 
@@ -13,13 +12,14 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 from pac.authority.dataset import save_oracle_dataset
+from pac.authority.dataset import canonical_config_hash
 from pac.authority.oracle import validate_formal_oracle_contract
-from pac.authority.training import collect_teacher_dataset_v3
+from pac.authority.training import collect_teacher_dataset_v3, normalize_oracle_profile
 from pac.experiment_config import load_v3_config
 
 
 def _plan(config, profile: str) -> dict[str, object]:
-    profile = str(profile).lower()
+    profile = normalize_oracle_profile(profile)
     if profile == "dry":
         return {
             "profile": "dry",
@@ -75,7 +75,7 @@ def _reject_output_path(path: Path) -> None:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default=str(ROOT / "config" / "pac_v3.yaml"))
-    parser.add_argument("--profile", choices=("dry", "short", "formal"), default="dry")
+    parser.add_argument("--profile", default="dry")
     parser.add_argument("--out-dir", required=True)
     return parser
 
@@ -86,28 +86,37 @@ def main(argv: list[str] | None = None) -> int:
     output = Path(args.out_dir).resolve()
     _reject_output_path(output)
     config = load_v3_config(config_path)
-    if args.profile in {"dry", "short", "formal"}:
+    profile = str(args.profile).strip().lower()
+    if not profile:
+        profile = "short"
+    profile = normalize_oracle_profile(profile)
+    if profile in {"dry", "short", "formal"}:
         validate_formal_oracle_contract(config.oracle)
-    plan = _plan(config, args.profile)
-    if args.profile == "dry":
+    plan = _plan(config, profile)
+    if profile == "dry":
         print(json.dumps(plan, sort_keys=True))
         return 0
 
-    dataset = collect_teacher_dataset_v3(config, args.profile)
+    dataset = collect_teacher_dataset_v3(config, profile)
     metadata = dataset.metadata
+    try:
+        config_source = config_path.relative_to(ROOT).as_posix()
+    except ValueError:
+        config_source = config_path.name
     provenance = {
-        "config_hash": hashlib.sha256(config_path.read_bytes()).hexdigest(),
-        "config_path": str(config_path),
-        "oracle": asdict(config.oracle),
-        "seed_partitions": {
+        "protocol_version": config.protocol.version,
+        "config_hash": canonical_config_hash(asdict(config)),
+        "config_source": config_source,
+        "oracle_settings": asdict(config.oracle),
+        "configured_seed_partitions": {
             "train": list(config.training.oracle_train_seeds),
             "val": list(config.training.oracle_val_seeds),
         },
-        "profile": args.profile,
+        "profile": profile,
     }
     manifest = save_oracle_dataset(dataset, output, provenance)
     print(json.dumps({
-        "profile": args.profile,
+        "profile": profile,
         "out_dir": str(output),
         "sample_count": manifest["sample_count"],
         "episodes": int(metadata["episode_uid"].nunique()),

@@ -215,6 +215,55 @@ class MPCFallbackTest(unittest.TestCase):
         self.assertEqual(controller.last_telemetry["fallback_mode"], "smc")
         self.assertGreaterEqual(solver.reset_calls, 1)
 
+    def test_plan_generation_increments_only_for_accepted_fresh_solutions(self):
+        from pac.controllers.mpc import MPCController
+        from pac.controllers.mpc_qp import MPCQPSettings, MPCSolution
+        from pac.simulation.dynamics import AUVDynamics
+        from pac.simulation.thrusters import build_real_10kg_x_layout
+
+        class _OneGoodThenFail:
+            def __init__(self):
+                self.calls = 0
+
+            def solve(self, *args):
+                A, B, c, x0, _xref, _u_prev = args
+                self.calls += 1
+                if self.calls > 1:
+                    raise RuntimeError("fail")
+                plan = np.zeros((1, 6))
+                state_plan = np.zeros((2, 12))
+                state_plan[0] = x0
+                state_plan[1] = A @ state_plan[0] + B @ plan[0] + c
+                return MPCSolution(
+                    plan=plan,
+                    state_plan=state_plan,
+                    status="solved",
+                    iter=1,
+                    run_time=0.0,
+                    wall_time=0.0,
+                    residual=0.0,
+                    warm_started=False,
+                    constraint_violation=0.0,
+                )
+
+            def reset(self):
+                pass
+
+        controller = MPCController(
+            dynamics=AUVDynamics(dt=0.01),
+            thruster_layout=build_real_10kg_x_layout(),
+            settings=MPCQPSettings(N=1, max_consecutive_plan_reuse=1),
+            solver=_OneGoodThenFail(),
+            fallback_controller=_Fallback(),
+        )
+        zeros = np.zeros(6)
+        controller.compute(zeros, zeros, zeros, t=0.0)
+        self.assertEqual(controller.last_telemetry["plan_generation"], 1)
+        controller.compute(zeros, zeros, zeros, t=0.0)
+        self.assertEqual(controller.last_telemetry["plan_generation"], 1)
+        controller.compute(zeros, zeros, zeros, t=0.0)
+        self.assertEqual(controller.last_telemetry["plan_generation"], 1)
+
     def test_true_mpc_preset_runs_fifty_finite_closed_loop_steps(self):
         from pac.controllers.presets import build_real10kg_mpc_ltv_v3
         from pac.simulation.core import AUVSimulator

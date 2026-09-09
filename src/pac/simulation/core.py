@@ -29,7 +29,9 @@ class AUVSimulator:
             dt: float = 0.01,
             actuator_command_min: float = -1.0,
             actuator_command_max: float = 1.0,
-            actuator_max_delta_per_step: float | None = None):
+            actuator_max_delta_per_step: float | None = None,
+            max_force: float = 35.0,
+            actuator_max_force: float | None = None):
         if int(scenario) not in {1, 2, 3}:
             raise ValueError("scenario must be one of 1, 2, or 3")
         self.scenario = int(scenario)
@@ -43,7 +45,12 @@ class AUVSimulator:
         self.vertical_current = float(vertical_current)
         self.vehicle_profile = str(vehicle_profile)
         self.thruster_layout_name = str(thruster_layout)
-        self.thruster_layout = build_thruster_layout(thruster_layout)
+        if actuator_max_force is not None:
+            max_force = actuator_max_force
+        self.max_force = float(max_force)
+        self.thruster_layout = build_thruster_layout(
+            thruster_layout, max_force=self.max_force
+        )
         self.actuator = SharedActuator(ActuatorLimits(
             command_min=actuator_command_min,
             command_max=actuator_command_max,

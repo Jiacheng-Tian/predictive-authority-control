@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 
 import numpy as np
 
@@ -24,6 +25,13 @@ class ThrusterLayout:
         if np.any(norms <= 1e-12):
             raise ValueError("Thruster direction vectors must be non-zero")
         object.__setattr__(self, "directions", self.directions / norms[:, None])
+        try:
+            max_force = float(self.max_force)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError("max_force must be finite and positive") from exc
+        if not math.isfinite(max_force) or max_force <= 0.0:
+            raise ValueError("max_force must be finite and positive")
+        object.__setattr__(self, "max_force", max_force)
 
     @property
     def allocation_matrix(self) -> np.ndarray:
@@ -49,7 +57,7 @@ class ThrusterLayout:
         return thrust / float(self.max_force)
 
 
-def build_real_10kg_x_layout() -> ThrusterLayout:
+def build_real_10kg_x_layout(max_force: float = 35.0) -> ThrusterLayout:
     """Build the rank-5 layout; pitch remains passively stabilized."""
     lx = 0.20
     ly = 0.175
@@ -71,11 +79,11 @@ def build_real_10kg_x_layout() -> ThrusterLayout:
         [0.0, 0.0, 1.0],
         [0.0, 0.0, 1.0],
     ])
-    return ThrusterLayout(positions=positions, directions=directions, max_force=35.0)
+    return ThrusterLayout(positions=positions, directions=directions, max_force=max_force)
 
 
-def build_thruster_layout(name: str | None = None) -> ThrusterLayout:
+def build_thruster_layout(name: str | None = None, max_force: float = 35.0) -> ThrusterLayout:
     key = str(name or "real_10kg_x")
     if key in {"real_10kg_x", "real_10kg_v1", "x_layout"}:
-        return build_real_10kg_x_layout()
+        return build_real_10kg_x_layout(max_force=max_force)
     raise ValueError(f"Unknown thruster layout '{key}'")

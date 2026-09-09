@@ -56,6 +56,7 @@ class MPCController:
         self._trajectory3d = True
         self._last_action = np.zeros(6, dtype=float)
         self._last_plan: np.ndarray | None = None
+        self._plan_generation = 0
         self._consecutive_failures = 0
         self._force_primary_authority = False
         self.last_telemetry: dict[str, object] = {}
@@ -121,13 +122,19 @@ class MPCController:
     def last_plan(self) -> np.ndarray | None:
         return None if self._last_plan is None else self._last_plan.copy()
 
+    @property
+    def plan_generation(self) -> int:
+        return int(self._plan_generation)
+
     def _set_telemetry(self, **values) -> None:
         values["force_primary_authority"] = self.force_primary_authority
+        values["plan_generation"] = int(self._plan_generation)
         self.last_telemetry = dict(values)
 
     def reset(self) -> None:
         self._last_action.fill(0.0)
         self._last_plan = None
+        self._plan_generation = 0
         self._consecutive_failures = 0
         self._force_primary_authority = False
         reset_solver = getattr(self.solver, "reset", None)
@@ -523,6 +530,7 @@ class MPCController:
             plan = self._project_sequence(plan, self._last_action)
             action = plan[0].copy()
             self._last_plan = plan.copy()
+            self._plan_generation += 1
             self._consecutive_failures = 0
             self._force_primary_authority = False
             self._record_solution_telemetry(

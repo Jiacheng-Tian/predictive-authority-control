@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+import copy
 from pathlib import Path
 from unittest.mock import patch
 
@@ -43,6 +44,24 @@ class _Primary:
         return np.zeros(6, dtype=float)
 
 
+class _StatefulPrimary:
+    def __init__(self):
+        self.calls = 0
+        self.state = 7
+
+    def reset(self):
+        self.calls = 0
+        self.state = 0
+
+    def set_trajectory3d(self, enabled=True):
+        self.trajectory3d = bool(enabled)
+
+    def compute(self, target, eta, nu, *, t=None, current_prediction=None):
+        self.calls += 1
+        self.state += 1
+        return np.full(6, self.state, dtype=float)
+
+
 class _Authority:
     def __init__(self):
         self.calls = 0
@@ -77,7 +96,7 @@ class RolloutOracleTest(unittest.TestCase):
         self.assertEqual(decision.alpha, 0.0)
         self.assertEqual(len(decision.costs), 3)
         self.assertEqual(authority.calls, 0)
-        self.assertEqual(len(primary.calls), 9)
+        self.assertEqual(len(primary.calls), 0)
         self.assertEqual(len(simulator.dynamics.calls), 9)
 
     def test_oracle_does_not_mutate_real_simulator_state_or_actuator(self):
@@ -108,6 +127,44 @@ class RolloutOracleTest(unittest.TestCase):
         np.testing.assert_array_equal(simulator.dynamics.nu, nu_before)
         np.testing.assert_array_equal(simulator.actuator._previous_applied, applied_before)
 
+    def test_oracle_deepcopies_primary_per_candidate_and_never_calls_original(self):
+        from pac.authority.oracle import OracleSettings, choose_rollout_oracle_alpha
+        from pac.simulation.actuators import ActuatorLimits
+
+        simulator = _Simulator()
+        primary = _StatefulPrimary()
+        before = copy.deepcopy(primary.__dict__)
+        choose_rollout_oracle_alpha(
+            current_eta=np.zeros(6),
+            current_nu=np.zeros(6),
+            previous_applied=np.zeros(6),
+            primary_controller=primary,
+            mpc_controller=_Authority(),
+            mpc_plan=np.zeros((2, 6)),
+            simulator=simulator,
+            current_provider=lambda stamp: np.zeros(3),
+            actuator_limits=ActuatorLimits(-1.0, 1.0, 10.0),
+            settings=OracleSettings(horizon=2, alpha_grid=(0.0, 1.0)),
+        )
+        self.assertEqual(primary.__dict__, before)
+
+    def test_oracle_fails_before_calling_primary_when_deepcopy_is_impossible(self):
+        from pac.authority.oracle import choose_rollout_oracle_alpha
+
+        class Uncopyable(_Primary):
+            def __deepcopy__(self, memo):
+                raise RuntimeError("no copy")
+
+        primary = Uncopyable()
+        with self.assertRaisesRegex(RuntimeError, "deepcopy"):
+            choose_rollout_oracle_alpha(
+                current_eta=np.zeros(6), current_nu=np.zeros(6), previous_applied=np.zeros(6),
+                primary_controller=primary, mpc_controller=_Authority(),
+                mpc_plan=np.zeros((2, 6)), simulator=_Simulator(),
+                current_provider=lambda stamp: np.zeros(3),
+            )
+        self.assertEqual(primary.calls, [])
+
     def test_v3_collection_rejects_missing_or_reused_mpc_plan(self):
         from pac.authority.training import collect_teacher_dataset_v3
         from pac.experiment_config import load_v3_config
@@ -135,10 +192,12 @@ class RolloutOracleTest(unittest.TestCase):
 
         for mode in ("solver_failure", "reuse_plan"):
             with self.subTest(mode=mode):
-                def build(name, current_mode=mode):
-                    return name, FakeController(authority="mpc" in name, mode=current_mode if "mpc" in name else "none")
-
-                with patch("pac.authority.training.build_controller", side_effect=build):
+                primary = FakeController(authority=False, mode="none")
+                authority = FakeController(authority=True, mode=mode)
+                with patch(
+                    "pac.authority.training.build_v3_controller_pair",
+                    return_value=(primary, authority),
+                ):
                     with self.assertRaisesRegex(RuntimeError, r"episode=.*step=0"):
                         collect_teacher_dataset_v3(config, "short")
 

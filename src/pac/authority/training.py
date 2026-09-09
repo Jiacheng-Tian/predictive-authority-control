@@ -16,6 +16,7 @@ from pac.authority.oracle import (
 from pac.authority.dataset import episode_fingerprint
 from pac.evaluation.episode_spec import build_episode_spec
 from pac.evaluation.episodes import build_controller, compute_controller_action
+from pac.controllers.presets import build_v3_controller_pair
 from pac.simulation.core import AUVSimulator
 from pac.simulation.observations import CausalCurrentEstimator
 
@@ -234,8 +235,16 @@ def collect_teacher_dataset(
     )
 
 
+def _normalize_collection_profile(profile: str | None) -> str:
+    normalized = "" if profile is None else str(profile).strip().lower()
+    return "short" if not normalized or normalized == "short" else normalized
+
+
+normalize_oracle_profile = _normalize_collection_profile
+
+
 def _collection_plan(config, profile: str) -> list[tuple[str, int, int]]:
-    profile = str(profile).strip().lower()
+    profile = _normalize_collection_profile(profile)
     if profile == "short":
         return [("train", 11000, 20), ("val", 12000, 20)]
     if profile == "formal":
@@ -252,7 +261,8 @@ def _collection_plan(config, profile: str) -> list[tuple[str, int, int]]:
 
 def collect_teacher_dataset_v3(config, profile: str = "formal"):
     """Collect the true-MPC v3 rollout teacher dataset once per episode."""
-    if str(profile).strip().lower() in {"short", "formal"}:
+    profile = _normalize_collection_profile(profile)
+    if profile in {"short", "formal"}:
         validate_formal_oracle_contract(config.oracle)
     plans = _collection_plan(config, profile)
     dt = float(config.environment.dt)
@@ -290,10 +300,12 @@ def collect_teacher_dataset_v3(config, profile: str = "formal"):
                 actuator_command_min=float(config.actuator.command_min),
                 actuator_command_max=float(config.actuator.command_max),
                 actuator_max_delta_per_step=float(config.actuator.max_delta_per_step),
+                max_force=float(config.actuator.max_force_n),
             )
             environment.reset(episode_spec=spec)
-            primary_name, primary = build_controller(config.controller.primary)
-            authority_name, authority = build_controller(config.controller.authority)
+            primary_name = config.controller.primary
+            authority_name = config.controller.authority
+            primary, authority = build_v3_controller_pair(config)
             for controller in (primary, authority):
                 controller.reset()
                 controller.set_trajectory3d(True)
@@ -305,6 +317,7 @@ def collect_teacher_dataset_v3(config, profile: str = "formal"):
             fingerprint = episode_fingerprint(spec)
             episode_end = float(steps) * dt
             previous_applied = np.zeros(6, dtype=float)
+            previous_plan_generation: int | None = None
             done = False
             while not done:
                 dynamics = environment.dynamics
@@ -350,7 +363,7 @@ def collect_teacher_dataset_v3(config, profile: str = "formal"):
                         plan_valid = (
                             plan_array.ndim == 2
                             and plan_array.shape[1] == 6
-                            and plan_array.shape[0] > 0
+                            and plan_array.shape[0] == int(config.mpc.horizon)
                             and np.isfinite(plan_array).all()
                         )
                     except (TypeError, ValueError, OverflowError):
@@ -367,6 +380,23 @@ def collect_teacher_dataset_v3(config, profile: str = "formal"):
                         f"accepted={telemetry.get('accepted', False)} "
                         f"fallback_mode={telemetry.get('fallback_mode', '')}"
                     )
+                try:
+                    plan_generation = int(telemetry["plan_generation"])
+                except (KeyError, TypeError, ValueError, OverflowError) as exc:
+                    raise RuntimeError(
+                        f"fresh accepted MPC plan required episode={spec.episode_uid} "
+                        f"step={step}: missing plan_generation"
+                    ) from exc
+                expected_generation = (
+                    1 if previous_plan_generation is None else previous_plan_generation + 1
+                )
+                if plan_generation != expected_generation:
+                    raise RuntimeError(
+                        f"fresh accepted MPC plan required episode={spec.episode_uid} "
+                        f"step={step}: plan_generation={plan_generation} "
+                        f"expected={expected_generation}"
+                    )
+                previous_plan_generation = plan_generation
 
                 decision = choose_rollout_oracle_alpha(
                     current_eta=dynamics.eta,
@@ -417,6 +447,12 @@ def collect_teacher_dataset_v3(config, profile: str = "formal"):
                     "primary_controller": primary_name,
                     "authority_controller": authority_name,
                 })
+            if profile == "formal":
+                print(
+                    f"oracle_episode_complete split={split} episode={spec.episode_uid} "
+                    f"samples={steps}",
+                    flush=True,
+                )
     from pac.authority.dataset import OracleDataset
 
     return OracleDataset(
@@ -427,8 +463,10 @@ def collect_teacher_dataset_v3(config, profile: str = "formal"):
 
 
 __all__ = [
+    "build_v3_controller_pair",
     "choose_oracle_alpha",
     "collect_teacher_dataset",
     "collect_teacher_dataset_v3",
+    "normalize_oracle_profile",
     "train_alpha_model",
 ]
