@@ -26,6 +26,10 @@ class AUVTrackingEnv(gym.Env):
             "vertical_current",
             "vehicle_profile",
             "thruster_layout",
+            "dt",
+            "actuator_command_min",
+            "actuator_command_max",
+            "actuator_max_delta_per_step",
         }
         unsupported = sorted(set(kwargs) - allowed)
         if unsupported:

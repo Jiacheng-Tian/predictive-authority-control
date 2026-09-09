@@ -14,8 +14,15 @@ class AUVDynamics:
             self,
             mass_scale_xy=1.0,
             damping_scale_xy=1.0,
-            vehicle_profile="real_10kg_v1"):
-        self.dt = 0.01
+            vehicle_profile="real_10kg_v1",
+            dt=0.01):
+        try:
+            dt = float(dt)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError("dt must be finite and positive") from exc
+        if not np.isfinite(dt) or dt <= 0.0:
+            raise ValueError("dt must be finite and positive")
+        self.dt = dt
         self.profile = get_vehicle_profile(vehicle_profile)
 
         mass = np.array(self.profile.effective_mass, dtype=float)
@@ -108,21 +115,29 @@ class AUVDynamics:
         eta_dot = self._J(eta) @ nu
         return nu_dot, eta_dot
 
-    def step(self, tau, v_current=None):
+    def predict_step(self, eta, nu, tau, v_current=None):
         if v_current is None:
             v_current = np.zeros(3)
         h = self.dt
-        nu, eta = self.nu.copy(), self.eta.copy()
+        eta = np.asarray(eta, dtype=float).reshape(6).copy()
+        nu = np.asarray(nu, dtype=float).reshape(6).copy()
 
         k1n, k1e = self._derivatives(nu, eta, tau, v_current)
         k2n, k2e = self._derivatives(nu + h / 2 * k1n, eta + h / 2 * k1e, tau, v_current)
         k3n, k3e = self._derivatives(nu + h / 2 * k2n, eta + h / 2 * k2e, tau, v_current)
         k4n, k4e = self._derivatives(nu + h * k3n, eta + h * k3e, tau, v_current)
 
-        self.nu = nu + h / 6 * (k1n + 2 * k2n + 2 * k3n + k4n)
-        self.eta = eta + h / 6 * (k1e + 2 * k2e + 2 * k3e + k4e)
+        next_nu = nu + h / 6 * (k1n + 2 * k2n + 2 * k3n + k4n)
+        next_eta = eta + h / 6 * (k1e + 2 * k2e + 2 * k3e + k4e)
 
         for i in [3, 4, 5]:
-            self.eta[i] = (self.eta[i] + np.pi) % (2 * np.pi) - np.pi
+            next_eta[i] = (next_eta[i] + np.pi) % (2 * np.pi) - np.pi
+
+        return next_eta.copy(), next_nu.copy()
+
+    def step(self, tau, v_current=None):
+        next_eta, next_nu = self.predict_step(self.eta, self.nu, tau, v_current)
+        self.eta = next_eta
+        self.nu = next_nu
 
         return self.eta.copy(), self.nu.copy()

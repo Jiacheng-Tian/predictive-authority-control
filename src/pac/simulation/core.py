@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from pac.simulation.actuators import ActuatorLimits, SharedActuator
 from pac.simulation.dynamics import AUVDynamics
 from pac.simulation.thrusters import build_thruster_layout
 
@@ -24,7 +25,11 @@ class AUVSimulator:
             initial_velocity_std: float = 0.0,
             vertical_current: float = 0.75,
             vehicle_profile: str = "real_10kg_v1",
-            thruster_layout: str = "real_10kg_x"):
+            thruster_layout: str = "real_10kg_x",
+            dt: float = 0.01,
+            actuator_command_min: float = -1.0,
+            actuator_command_max: float = 1.0,
+            actuator_max_delta_per_step: float | None = None):
         if int(scenario) not in {1, 2, 3}:
             raise ValueError("scenario must be one of 1, 2, or 3")
         self.scenario = int(scenario)
@@ -39,10 +44,16 @@ class AUVSimulator:
         self.vehicle_profile = str(vehicle_profile)
         self.thruster_layout_name = str(thruster_layout)
         self.thruster_layout = build_thruster_layout(thruster_layout)
+        self.actuator = SharedActuator(ActuatorLimits(
+            command_min=actuator_command_min,
+            command_max=actuator_command_max,
+            max_delta_per_step=actuator_max_delta_per_step,
+        ))
         self.dynamics = AUVDynamics(
             mass_scale_xy=self.mass_scale_xy,
             damping_scale_xy=self.damping_scale_xy,
             vehicle_profile=self.vehicle_profile,
+            dt=dt,
         )
         self.current_step = 0
         self.prev_action = np.zeros(6)
@@ -94,6 +105,7 @@ class AUVSimulator:
 
     def reset(self, seed: int | None = None) -> None:
         self.dynamics.reset()
+        self.actuator.reset()
         random = np.random.default_rng(seed)
         if self.initial_position_std > 0.0:
             self.dynamics.eta[:3] = random.normal(0.0, self.initial_position_std, size=3)
@@ -106,13 +118,14 @@ class AUVSimulator:
         self._previous_current_velocity = horizontal.copy()
 
     def step(self, action) -> tuple[bool, dict]:
-        action = np.clip(action, -1.0, 1.0)
+        actuator_step = self.actuator.apply(action)
+        applied_action = actuator_step.applied
         t = self.current_step * self.dynamics.dt
         horizontal_current = self._generate_current(t)
         current = self._current_for_dynamics(horizontal_current)
         self._previous_current_velocity = self._true_current_velocity[:2].copy()
         self._true_current_velocity = current.copy()
-        wrench, thruster_forces = self._action_to_wrench(action)
+        wrench, thruster_forces = self._action_to_wrench(applied_action)
         eta, nu = self.dynamics.step(wrench, current)
         self.current_step += 1
 
@@ -122,9 +135,9 @@ class AUVSimulator:
         for index in (3, 4, 5):
             error[index] = (error[index] + np.pi) % (2 * np.pi) - np.pi
         position_error = float(np.linalg.norm(error[:3]))
-        smoothness = float(np.sum((action - self.prev_action) ** 2))
-        energy = float(np.sum(action ** 2))
-        self.prev_action = action.copy()
+        smoothness = float(np.sum((applied_action - self.prev_action) ** 2))
+        energy = float(np.sum(applied_action ** 2))
+        self.prev_action = applied_action.copy()
         done = self.current_step >= self.max_steps or position_error > 20.0
         return done, {
             "dist_error": position_error,
@@ -133,6 +146,11 @@ class AUVSimulator:
             "heading_error": float(abs(error[5])),
             "energy": energy,
             "reward_smoothness": smoothness,
+            "requested_action": actuator_step.requested.copy(),
+            "amplitude_clipped_action": actuator_step.amplitude_clipped.copy(),
+            "applied_action": applied_action.copy(),
+            "actuator_amplitude_clipped_fraction": actuator_step.amplitude_clipped_fraction,
+            "actuator_rate_limited_fraction": actuator_step.rate_limited_fraction,
             "privileged_state": np.array([current[0], current[1], current[2], 0.0, 0.0, 0.0]),
             "applied_wrench": wrench.copy(),
             "thruster_forces": thruster_forces.copy(),
