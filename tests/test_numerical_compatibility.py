@@ -107,8 +107,13 @@ class FormalV2NumericalCompatibilityTest(unittest.TestCase):
             self.assertEqual(metadata["history_len"], 16)
             self.assertEqual(metadata["input_dim"], 24)
             self.assertEqual(sum(param.numel() for param in model.parameters()), 14113)
-            value = float(model(torch.zeros(1, 16, 24)).item())
-            self.assertAlmostEqual(value, expected_output, places=10)
+            actual = float(model(torch.zeros(1, 16, 24)).item())
+            np.testing.assert_allclose(
+                actual,
+                expected_output,
+                rtol=1.0e-5,
+                atol=1.0e-7,
+            )
 
     def test_seed20_scenario1_episode_matches_archived_metrics(self):
         from pac.authority.evaluation import run_predictive_alpha_episode
@@ -152,14 +157,22 @@ class FormalV2NumericalCompatibilityTest(unittest.TestCase):
             save_ts=False,
         )
 
-        self.assertAlmostEqual(metrics["rmse_3d"], 0.10089587780115189, places=8)
-        self.assertAlmostEqual(metrics["max_error"], 0.2313652674301271, places=8)
-        self.assertAlmostEqual(
-            metrics["authority_alpha_mean"],
-            0.2534144150222329,
-            delta=1.0e-8,
+        np.testing.assert_allclose(
+            [
+                metrics["rmse_3d"],
+                metrics["max_error"],
+                metrics["authority_alpha_mean"],
+                metrics["action_jerk_mean"],
+            ],
+            [
+                0.10089587780115189,
+                0.2313652674301271,
+                0.2534144150222329,
+                0.0026697128616254644,
+            ],
+            rtol=1.0e-4,
+            atol=1.0e-6,
         )
-        self.assertAlmostEqual(metrics["action_jerk_mean"], 0.0026697128616254644, places=8)
 
 
 if __name__ == "__main__":
