@@ -420,15 +420,6 @@ def choose_rollout_oracle_alpha(
             raise RuntimeError(
                 "primary_controller deepcopy failed; rollout oracle made no primary calls"
             ) from exc
-        try:
-            reset = getattr(clone, "reset", None)
-            if callable(reset):
-                reset()
-            set_trajectory = getattr(clone, "set_trajectory3d", None)
-            if callable(set_trajectory):
-                set_trajectory(True)
-        except Exception as exc:
-            raise RuntimeError("primary_controller clone initialization failed") from exc
         primary_clones.append(clone)
     try:
         for candidate_index, alpha in enumerate(candidate_alphas):

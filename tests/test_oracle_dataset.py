@@ -3,6 +3,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
@@ -96,11 +97,20 @@ class OracleDatasetTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             assert_unique_episode_fingerprints(pd.DataFrame({"episode_fingerprint": ["a", "a"]}))
 
+    def test_episode_fingerprint_normalizes_endian_and_memory_layout(self):
+        from pac.authority.dataset import episode_fingerprint
+
+        little = np.arange(12, dtype="<f8").reshape(3, 4)
+        big = np.asfortranarray(little.astype(">f8"))
+        first = SimpleNamespace(values=little, nested=np.array([1.0, 2.0], dtype="<f8"))
+        second = SimpleNamespace(values=big, nested=np.array([1.0, 2.0], dtype=">f8"))
+        self.assertEqual(episode_fingerprint(first), episode_fingerprint(second))
+
     def test_content_hash_is_portable_and_manifest_distinguishes_actual_seeds(self):
         from pac.authority.dataset import canonical_dataset_hash, save_oracle_dataset
 
         first = _dataset()
-        reordered = first.metadata.loc[::-1, list(reversed(first.metadata.columns))].reset_index(drop=True)
+        reordered = first.metadata.loc[:, list(reversed(first.metadata.columns))].copy()
         second = type(first)(
             np.ascontiguousarray(first.features.astype(">f4")),
             np.asfortranarray(first.labels.astype("<f4")),
@@ -123,6 +133,8 @@ class OracleDatasetTest(unittest.TestCase):
             "dependency_versions": {"numpy": "two"},
         })
         self.assertEqual(canonical_dataset_hash(first, semantic), canonical_dataset_hash(second, changed_paths))
+        swapped = type(first)(first.features, first.labels, reordered.iloc[::-1].reset_index(drop=True))
+        self.assertNotEqual(canonical_dataset_hash(first, semantic), canonical_dataset_hash(swapped, semantic))
         with tempfile.TemporaryDirectory() as temp_dir:
             manifest = save_oracle_dataset(
                 first,

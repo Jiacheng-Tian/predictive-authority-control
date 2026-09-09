@@ -5,7 +5,12 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
+from io import StringIO
 from pathlib import Path
+from unittest.mock import patch
+
+import numpy as np
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -75,6 +80,41 @@ class GenerateOracleDatasetTest(unittest.TestCase):
                 )
                 self.assertNotEqual(completed.returncode, 0)
                 self.assertIn("horizon", completed.stderr + completed.stdout)
+
+    def test_formal_episode_progress_uses_stderr_and_stdout_stays_quiet(self):
+        from pac.authority.training import collect_teacher_dataset_v3
+        from pac.experiment_config import load_v3_config
+
+        config = load_v3_config(ROOT / "config" / "pac_v3.yaml")
+
+        class FakeController:
+            def __init__(self, authority=False):
+                self.last_plan = np.zeros((config.mpc.horizon, 6)) if authority else None
+                self.last_telemetry = {"accepted": False, "fallback_mode": "none", "plan_generation": 0}
+                self.authority = authority
+
+            def reset(self):
+                self.last_telemetry["plan_generation"] = 0
+
+            def set_trajectory3d(self, enabled=True):
+                pass
+
+            def compute(self, target, eta, nu, *, t=None, current_prediction=None):
+                if self.authority:
+                    self.last_telemetry.update(accepted=True, plan_generation=self.last_telemetry["plan_generation"] + 1)
+                return np.zeros(6)
+
+        stdout = StringIO()
+        stderr = StringIO()
+        with patch("pac.authority.training._collection_plan", return_value=[("train", 11000, 1)]):
+            with patch(
+                "pac.authority.training.build_v3_controller_pair",
+                return_value=(FakeController(), FakeController(authority=True)),
+            ):
+                with redirect_stdout(stdout), redirect_stderr(stderr):
+                    collect_teacher_dataset_v3(config, "formal")
+        self.assertEqual(stdout.getvalue(), "")
+        self.assertEqual(stderr.getvalue().count("oracle_episode_complete"), 3)
 
 
 if __name__ == "__main__":

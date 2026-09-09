@@ -44,11 +44,17 @@ def _json_value(value: Any) -> Any:
         return _json_value(asdict(value))
     if isinstance(value, np.ndarray):
         array = np.asarray(value)
+        if np.issubdtype(array.dtype, np.number) or np.issubdtype(array.dtype, np.bool_):
+            canonical = np.ascontiguousarray(array.astype("<f8", copy=False))
+            canonical_dtype = "float64-little-endian"
+        else:
+            canonical = np.ascontiguousarray(array.astype("<U"))
+            canonical_dtype = "unicode"
         return {
             "__ndarray__": True,
-            "dtype": array.dtype.str,
+            "dtype": canonical_dtype,
             "shape": list(array.shape),
-            "data": base64.b64encode(np.ascontiguousarray(array).tobytes()).decode("ascii"),
+            "data": base64.b64encode(canonical.tobytes()).decode("ascii"),
         }
     if isinstance(value, np.generic):
         return _json_value(value.item())
@@ -302,13 +308,13 @@ def _canonical_metadata(metadata: pd.DataFrame) -> bytes:
             column: cell(column, metadata[column].iloc[index])
             for column in columns
         }
+        record["row_index"] = {"type": "int64", "value": str(index)}
         records.append(_canonical_json(record).decode("utf-8"))
-    records.sort()
-    return _canonical_json({"columns": columns, "rows": records})
+    return _canonical_json({"columns": [*columns, "row_index"], "rows": records})
 
 
 def canonical_dataset_hash(dataset: OracleDataset, provenance: Any | None = None) -> str:
-    """Hash portable arrays, sorted metadata content, and semantic provenance."""
+    """Hash portable arrays, row-aligned metadata content, and semantic provenance."""
     dataset = dataset if isinstance(dataset, OracleDataset) else OracleDataset(**dataset)
     digest = hashlib.sha256()
     digest.update(b"pac-oracle-dataset-v1\0")
@@ -322,6 +328,11 @@ def canonical_dataset_hash(dataset: OracleDataset, provenance: Any | None = None
     digest.update(_canonical_metadata(dataset.metadata))
     digest.update(_canonical_json(_semantic_provenance(provenance)))
     return digest.hexdigest()
+
+
+def dataset_content_hash(dataset: OracleDataset, provenance: Any | None = None) -> str:
+    """Public name for the row-aligned canonical dataset content hash."""
+    return canonical_dataset_hash(dataset, provenance)
 
 
 def _file_sha256(path: Path) -> str:
@@ -472,6 +483,7 @@ __all__ = [
     "assert_unique_episode_fingerprints",
     "canonical_config_hash",
     "canonical_dataset_hash",
+    "dataset_content_hash",
     "episode_fingerprint",
     "load_oracle_dataset",
     "save_oracle_dataset",

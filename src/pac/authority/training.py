@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+import sys
 
 from pac.authority.evaluation import blend_actions_with_predicted_alpha
 from pac.authority.features import build_alpha_feature, wrap_angle
@@ -451,6 +452,7 @@ def collect_teacher_dataset_v3(config, profile: str = "formal"):
                 print(
                     f"oracle_episode_complete split={split} episode={spec.episode_uid} "
                     f"samples={steps}",
+                    file=sys.stderr,
                     flush=True,
                 )
     from pac.authority.dataset import OracleDataset

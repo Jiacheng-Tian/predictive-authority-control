@@ -45,11 +45,14 @@ class _Primary:
 
 
 class _StatefulPrimary:
+    reset_events = []
+
     def __init__(self):
         self.calls = 0
         self.state = 7
 
     def reset(self):
+        type(self).reset_events.append("reset")
         self.calls = 0
         self.state = 0
 
@@ -133,6 +136,7 @@ class RolloutOracleTest(unittest.TestCase):
 
         simulator = _Simulator()
         primary = _StatefulPrimary()
+        _StatefulPrimary.reset_events.clear()
         before = copy.deepcopy(primary.__dict__)
         choose_rollout_oracle_alpha(
             current_eta=np.zeros(6),
@@ -147,6 +151,7 @@ class RolloutOracleTest(unittest.TestCase):
             settings=OracleSettings(horizon=2, alpha_grid=(0.0, 1.0)),
         )
         self.assertEqual(primary.__dict__, before)
+        self.assertEqual(_StatefulPrimary.reset_events, [])
 
     def test_oracle_fails_before_calling_primary_when_deepcopy_is_impossible(self):
         from pac.authority.oracle import choose_rollout_oracle_alpha

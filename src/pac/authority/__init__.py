@@ -1,6 +1,6 @@
 """PAC authority-model training, rollout oracles, and datasets."""
 
-from .dataset import OracleDataset
+from .dataset import OracleDataset, dataset_content_hash
 from .oracle import (
     OracleDecision,
     OracleSettings,
@@ -10,6 +10,7 @@ from .oracle import (
 
 __all__ = [
     "OracleDataset",
+    "dataset_content_hash",
     "OracleDecision",
     "OracleSettings",
     "choose_rollout_oracle_alpha",
