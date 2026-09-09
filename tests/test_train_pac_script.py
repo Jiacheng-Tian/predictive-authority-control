@@ -76,6 +76,26 @@ class TrainPacScriptTest(unittest.TestCase):
             self.assertTrue((output / "manifest.json").exists())
             self.assertEqual(len(list(output.glob("pac_train_seed_*"))), 1)
 
+    def test_dry_rejects_nonformal_model_seeds_without_writing(self):
+        import yaml
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            dataset = root / "dataset"
+            output = root / "dry-output"
+            config_path = root / "invalid-seeds.yaml"
+            _write_dataset(dataset)
+            config = yaml.safe_load((ROOT / "config" / "pac_v3.yaml").read_text(encoding="utf-8"))
+            config["training"]["model_seeds"] = [999]
+            config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+            completed = subprocess.run(
+                [sys.executable, "scripts/train_pac.py", "--config", str(config_path), "--dataset-dir", str(dataset), "--out-dir", str(output), "--profile", "dry"],
+                cwd=ROOT, text=True, capture_output=True, check=False,
+            )
+            self.assertNotEqual(completed.returncode, 0)
+            self.assertIn("31000", completed.stderr + completed.stdout)
+            self.assertFalse(output.exists())
+
 
 if __name__ == "__main__":
     unittest.main()

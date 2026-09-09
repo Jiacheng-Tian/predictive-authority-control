@@ -119,6 +119,8 @@ def main(argv: list[str] | None = None) -> int:
     output_dir = Path(args.out_dir).resolve()
     _reject_output(output_dir)
     config = load_v3_config(config_path)
+    if args.profile == "dry":
+        _profile_seeds(config, "formal")
     dataset_manifest = _read_dataset_manifest(dataset_dir)
     dataset_manifest["_manifest_path"] = str(dataset_dir / "manifest.json")
     if args.profile == "dry":

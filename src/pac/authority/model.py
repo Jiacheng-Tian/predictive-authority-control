@@ -531,6 +531,76 @@ def _default_dependency_versions() -> dict[str, str]:
     return versions
 
 
+def _require_nonempty_string(value: Any, name: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{name} must be a non-empty string")
+    return value
+
+
+def _require_finite_number(value: Any, name: str) -> float:
+    if isinstance(value, (bool, np.bool_)) or not isinstance(
+        value, (int, float, np.integer, np.floating)
+    ):
+        raise ValueError(f"{name} must be a finite number")
+    result = float(value)
+    if not math.isfinite(result):
+        raise ValueError(f"{name} must be a finite number")
+    return result
+
+
+def _require_integer(value: Any, name: str) -> int:
+    if isinstance(value, (bool, np.bool_)) or not isinstance(value, (int, np.integer)):
+        raise ValueError(f"{name} must be an integer")
+    return int(value)
+
+
+def _validate_training_metrics(
+        value: Any,
+        parameter_count: int,
+) -> dict[str, Any]:
+    if not isinstance(value, Mapping) or not value:
+        raise ValueError("training_metrics must be a non-empty mapping")
+    metrics = dict(value)
+    best_key = next(
+        (key for key in ("best_val_mse", "val_mse", "best") if key in metrics),
+        None,
+    )
+    if best_key is None:
+        raise ValueError("training_metrics must contain best_val_mse, val_mse, or best")
+    _require_finite_number(metrics[best_key], f"training_metrics.{best_key}")
+    best_epoch = _require_integer(metrics.get("best_epoch"), "training_metrics.best_epoch")
+    epochs_ran = _require_integer(metrics.get("epochs_ran"), "training_metrics.epochs_ran")
+    if best_epoch <= 0 or epochs_ran <= 0 or best_epoch > epochs_ran:
+        raise ValueError("training_metrics best_epoch/epochs_ran must be positive and ordered")
+    parameter_key = "param_count" if "param_count" in metrics else "parameter_count"
+    if parameter_key not in metrics:
+        raise ValueError("training_metrics must contain param_count or parameter_count")
+    metric_parameter_count = _require_integer(
+        metrics[parameter_key], f"training_metrics.{parameter_key}"
+    )
+    if metric_parameter_count != int(parameter_count):
+        raise ValueError("training_metrics parameter count does not match checkpoint model")
+    return metrics
+
+
+def _validate_checkpoint_artifact_metadata(
+        git_commit: Any,
+        dependency_versions: Any,
+        training_metrics: Any,
+        parameter_count: int,
+) -> tuple[str, dict[str, str], dict[str, Any]]:
+    commit = _require_nonempty_string(git_commit, "git_commit")
+    if not isinstance(dependency_versions, Mapping) or not dependency_versions:
+        raise ValueError("dependency_versions must be a non-empty mapping")
+    dependencies: dict[str, str] = {}
+    for key, value in dependency_versions.items():
+        name = _require_nonempty_string(key, "dependency_versions key")
+        version = _require_nonempty_string(value, f"dependency_versions[{name}]")
+        dependencies[name] = version
+    metrics = _validate_training_metrics(training_metrics, parameter_count)
+    return commit, dependencies, metrics
+
+
 def save_v3_checkpoint(
         checkpoint_path: str | Path,
         model: TemporalAlphaTransformer,
@@ -565,6 +635,18 @@ def save_v3_checkpoint(
         raise ValueError(f"V3 checkpoint requires 14113 parameters, got {parameter_count}")
     if int(model.input_dim) != 24:
         raise ValueError("V3 checkpoint requires input_dim=24")
+    git_value = git_commit if git_commit is not None else _default_git_commit()
+    dependency_value = (
+        dependency_versions
+        if dependency_versions is not None
+        else _default_dependency_versions()
+    )
+    git_value, dependency_value, metrics_value = _validate_checkpoint_artifact_metadata(
+        git_value,
+        dependency_value,
+        training_metrics,
+        parameter_count,
+    )
     payload: dict[str, Any] = {
         "protocol_version": protocol_version,
         "state_dict": {name: value.detach().cpu().clone() for name, value in model.state_dict().items()},
@@ -589,10 +671,11 @@ def save_v3_checkpoint(
         "dataset_hash": dataset_hash,
         "config_semantic_sha256": semantic_hash,
         "authority_model_config_semantic_sha256": model_config_hash,
-        "git_commit": git_commit if git_commit is not None else _default_git_commit(),
-        "dependency_versions": dict(dependency_versions or _default_dependency_versions()),
-        "training_metrics": dict(training_metrics or {}),
+        "git_commit": git_value,
+        "dependency_versions": dependency_value,
+        "training_metrics": metrics_value,
         "param_count": parameter_count,
+        "parameter_count": parameter_count,
     }
     target.parent.mkdir(parents=True, exist_ok=True)
     torch.save(payload, target)
@@ -630,11 +713,22 @@ def load_v3_checkpoint(
     required_keys = (
         "history_len", "embed_dim", "heads", "layers", "dropout",
         "model_seed", "dataset_hash", "config_semantic_sha256", "param_count",
+        "git_commit", "dependency_versions", "training_metrics",
     )
     if any(key not in checkpoint for key in required_keys):
         raise ValueError("V3 checkpoint metadata is incomplete")
-    if int(checkpoint["param_count"]) != 14113:
+    stored_parameter_count = _require_integer(checkpoint["param_count"], "param_count")
+    if stored_parameter_count != 14113:
         raise ValueError("V3 checkpoint parameter count must be 14113")
+    if "parameter_count" in checkpoint:
+        if _require_integer(checkpoint["parameter_count"], "parameter_count") != stored_parameter_count:
+            raise ValueError("V3 checkpoint parameter_count mismatch")
+    _validate_checkpoint_artifact_metadata(
+        checkpoint["git_commit"],
+        checkpoint["dependency_versions"],
+        checkpoint["training_metrics"],
+        stored_parameter_count,
+    )
     stored_model_seed = _validated_model_seed(checkpoint["model_seed"])
     if not isinstance(checkpoint["dataset_hash"], str) or not checkpoint["dataset_hash"]:
         raise ValueError("V3 checkpoint dataset_hash is invalid")
