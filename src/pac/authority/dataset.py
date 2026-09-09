@@ -154,6 +154,33 @@ def _validate_metadata(metadata: pd.DataFrame, length: int) -> pd.DataFrame:
             numeric = values.to_numpy(dtype=float)
             if not np.isfinite(numeric).all():
                 raise ValueError(f"metadata column {column} must contain finite values")
+    if not pd.api.types.is_integer_dtype(metadata["step"]):
+        raise ValueError("metadata step must have an integer dtype")
+    if not pd.api.types.is_numeric_dtype(metadata["sample_time"]):
+        raise ValueError("metadata sample_time must have a numeric dtype")
+    seen_episodes: set[str] = set()
+    previous_episode: str | None = None
+    for episode_uid in metadata["episode_uid"].tolist():
+        if episode_uid != previous_episode:
+            if episode_uid in seen_episodes:
+                raise ValueError("metadata episode rows must be contiguous")
+            if previous_episode is not None:
+                seen_episodes.add(previous_episode)
+            previous_episode = episode_uid
+    if previous_episode is not None:
+        seen_episodes.add(previous_episode)
+    for episode_uid, episode in metadata.groupby("episode_uid", sort=False):
+        steps = episode["step"].to_numpy(dtype=np.int64)
+        expected_steps = np.arange(len(episode), dtype=np.int64)
+        if not np.array_equal(steps, expected_steps):
+            raise ValueError(
+                f"metadata episode {episode_uid} steps must be exactly 0..n-1"
+            )
+        sample_times = episode["sample_time"].to_numpy(dtype=float)
+        if len(sample_times) > 1 and not bool(np.all(np.diff(sample_times) > 0.0)):
+            raise ValueError(
+                f"metadata episode {episode_uid} sample_time must be strictly increasing"
+            )
     return metadata.copy(deep=True)
 
 

@@ -7,9 +7,11 @@ import hashlib
 import importlib.metadata
 import json
 import math
+import os
 from pathlib import Path
 import random
 import subprocess
+import tempfile
 from typing import Any, Mapping
 
 import numpy as np
@@ -371,7 +373,7 @@ def _metadata_episode_ids(metadata: pd.DataFrame, sample_count: int) -> np.ndarr
     return identifiers
 
 
-def train_alpha_model_v3(
+def _train_alpha_model_v3_impl(
         dataset: Any,
         config: Any,
         model_seed: int,
@@ -511,6 +513,47 @@ def train_alpha_model_v3(
     return model, history, metrics
 
 
+def train_alpha_model_v3(
+        dataset: Any,
+        config: Any,
+        model_seed: int,
+        max_epochs: int | None = None,
+        patience: int | None = None,
+) -> tuple[TemporalAlphaTransformer, pd.DataFrame, dict[str, Any]]:
+    """Train V3 while restoring every process-global random/configuration state."""
+    python_state = random.getstate()
+    numpy_state = np.random.get_state()
+    torch_state = torch.get_rng_state()
+    cuda_states = torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None
+    deterministic = torch.are_deterministic_algorithms_enabled()
+    warn_only = (
+        torch.is_deterministic_algorithms_warn_only_enabled()
+        if hasattr(torch, "is_deterministic_algorithms_warn_only_enabled")
+        else False
+    )
+    cudnn_deterministic = getattr(torch.backends.cudnn, "deterministic", None)
+    cudnn_benchmark = getattr(torch.backends.cudnn, "benchmark", None)
+    try:
+        return _train_alpha_model_v3_impl(
+            dataset,
+            config,
+            model_seed=model_seed,
+            max_epochs=max_epochs,
+            patience=patience,
+        )
+    finally:
+        random.setstate(python_state)
+        np.random.set_state(numpy_state)
+        torch.set_rng_state(torch_state)
+        if cuda_states is not None:
+            torch.cuda.set_rng_state_all(cuda_states)
+        torch.use_deterministic_algorithms(deterministic, warn_only=warn_only)
+        if cudnn_deterministic is not None:
+            torch.backends.cudnn.deterministic = cudnn_deterministic
+        if cudnn_benchmark is not None:
+            torch.backends.cudnn.benchmark = cudnn_benchmark
+
+
 def _default_git_commit() -> str | None:
     try:
         root = Path(__file__).resolve().parents[3]
@@ -519,6 +562,30 @@ def _default_git_commit() -> str | None:
         ).strip()
     except (OSError, subprocess.CalledProcessError):
         return None
+
+
+def _default_git_provenance() -> dict[str, Any]:
+    root = Path(__file__).resolve().parents[3]
+    commit = _default_git_commit()
+    try:
+        status = subprocess.check_output(
+            ["git", "status", "--porcelain", "--untracked-files=all"],
+            cwd=root,
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
+        diff = subprocess.check_output(
+            ["git", "diff", "--binary", "HEAD"],
+            cwd=root,
+            stderr=subprocess.DEVNULL,
+        )
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise ValueError("unable to collect git provenance") from exc
+    return {
+        "git_commit": commit,
+        "git_dirty": bool(status.strip()),
+        "git_diff_sha256": hashlib.sha256(diff).hexdigest(),
+    }
 
 
 def _default_dependency_versions() -> dict[str, str]:
@@ -611,6 +678,8 @@ def save_v3_checkpoint(
         git_commit: str | None = None,
         dependency_versions: Mapping[str, str] | None = None,
         training_metrics: Mapping[str, Any] | None = None,
+        git_dirty: bool | None = None,
+        git_diff_sha256: str | None = None,
         protocol_version: str = "formal_true_mpc_v3") -> dict[str, Any]:
     """Write a new V3 checkpoint, refusing every pre-existing target."""
     if isinstance(checkpoint_path, TemporalAlphaTransformer) and not isinstance(model, TemporalAlphaTransformer):
@@ -635,7 +704,20 @@ def save_v3_checkpoint(
         raise ValueError(f"V3 checkpoint requires 14113 parameters, got {parameter_count}")
     if int(model.input_dim) != 24:
         raise ValueError("V3 checkpoint requires input_dim=24")
-    git_value = git_commit if git_commit is not None else _default_git_commit()
+    if git_commit is None or git_dirty is None or git_diff_sha256 is None:
+        git_provenance = _default_git_provenance()
+    else:
+        git_provenance = {
+            "git_commit": git_commit,
+            "git_dirty": git_dirty,
+            "git_diff_sha256": git_diff_sha256,
+        }
+    git_value = git_provenance["git_commit"]
+    if not isinstance(git_provenance["git_dirty"], bool):
+        raise ValueError("git_dirty must be a boolean")
+    git_diff_value = _require_nonempty_string(
+        git_provenance["git_diff_sha256"], "git_diff_sha256"
+    )
     dependency_value = (
         dependency_versions
         if dependency_versions is not None
@@ -672,17 +754,40 @@ def save_v3_checkpoint(
         "config_semantic_sha256": semantic_hash,
         "authority_model_config_semantic_sha256": model_config_hash,
         "git_commit": git_value,
+        "git_dirty": git_provenance["git_dirty"],
+        "git_diff_sha256": git_diff_value,
         "dependency_versions": dependency_value,
         "training_metrics": metrics_value,
         "param_count": parameter_count,
         "parameter_count": parameter_count,
     }
     target.parent.mkdir(parents=True, exist_ok=True)
-    torch.save(payload, target)
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="wb",
+            prefix=f".{target.name}.tmp-",
+            dir=target.parent,
+            delete=False,
+        ) as stream:
+            temporary_path = Path(stream.name)
+            torch.save(payload, stream)
+            stream.flush()
+            os.fsync(stream.fileno())
+        if target.exists():
+            raise FileExistsError(f"checkpoint target already exists: {target}")
+        os.replace(temporary_path, target)
+        temporary_path = None
+    finally:
+        if temporary_path is not None:
+            try:
+                temporary_path.unlink()
+            except FileNotFoundError:
+                pass
     return payload
 
 
-def load_v3_checkpoint(
+def _load_v3_checkpoint_impl(
         checkpoint_path: str | Path,
         config: Any | None = None,
         *,
@@ -711,9 +816,13 @@ def load_v3_checkpoint(
     if int(checkpoint.get("input_dim", -1)) != 24:
         raise ValueError("V3 checkpoint must have input_dim=24")
     required_keys = (
-        "history_len", "embed_dim", "heads", "layers", "dropout",
+        "architecture", "policy_architecture", "input_dim", "feature_mode",
+        "history_len", "embed_dim", "transformer_embed_dim", "heads",
+        "transformer_heads", "layers", "transformer_layers", "dropout",
+        "model_dropout",
         "model_seed", "dataset_hash", "config_semantic_sha256", "param_count",
-        "git_commit", "dependency_versions", "training_metrics",
+        "git_commit", "git_dirty", "git_diff_sha256", "dependency_versions",
+        "training_metrics",
     )
     if any(key not in checkpoint for key in required_keys):
         raise ValueError("V3 checkpoint metadata is incomplete")
@@ -729,6 +838,52 @@ def load_v3_checkpoint(
         checkpoint["training_metrics"],
         stored_parameter_count,
     )
+    if not isinstance(checkpoint["git_dirty"], bool):
+        raise ValueError("V3 checkpoint git_dirty must be a boolean")
+    _require_nonempty_string(checkpoint["git_diff_sha256"], "git_diff_sha256")
+    if checkpoint["architecture"] != "transformer":
+        raise ValueError("V3 checkpoint architecture must be transformer")
+    if checkpoint["policy_architecture"] != checkpoint["architecture"]:
+        raise ValueError("V3 checkpoint policy_architecture alias mismatch")
+    if checkpoint["feature_mode"] != "state_phase":
+        raise ValueError("V3 checkpoint feature_mode must be state_phase")
+    if _require_integer(checkpoint["input_dim"], "input_dim") != 24:
+        raise ValueError("V3 checkpoint input_dim must be 24")
+    history_len = _require_integer(checkpoint["history_len"], "history_len")
+    embed_dim = _require_integer(checkpoint["embed_dim"], "embed_dim")
+    heads = _require_integer(checkpoint["heads"], "heads")
+    layers = _require_integer(checkpoint["layers"], "layers")
+    dropout = _require_finite_number(checkpoint["dropout"], "dropout")
+    if _require_integer(checkpoint["transformer_embed_dim"], "transformer_embed_dim") != embed_dim:
+        raise ValueError("V3 checkpoint embed_dim alias mismatch")
+    if _require_integer(checkpoint["transformer_heads"], "transformer_heads") != heads:
+        raise ValueError("V3 checkpoint heads alias mismatch")
+    if _require_integer(checkpoint["transformer_layers"], "transformer_layers") != layers:
+        raise ValueError("V3 checkpoint layers alias mismatch")
+    if _require_finite_number(checkpoint["model_dropout"], "model_dropout") != dropout:
+        raise ValueError("V3 checkpoint dropout alias mismatch")
+    if config is not None:
+        expected_values = _authority_model_values(config)
+        expected_fields = {
+            "architecture": expected_values["architecture"],
+            "feature_mode": expected_values["feature_mode"],
+            "history_len": expected_values["history_len"],
+            "embed_dim": expected_values["embed_dim"],
+            "heads": expected_values["heads"],
+            "layers": expected_values["layers"],
+            "dropout": expected_values["dropout"],
+        }
+        actual_fields = {
+            "architecture": checkpoint["architecture"],
+            "feature_mode": checkpoint["feature_mode"],
+            "history_len": history_len,
+            "embed_dim": embed_dim,
+            "heads": heads,
+            "layers": layers,
+            "dropout": dropout,
+        }
+        if actual_fields != expected_fields:
+            raise ValueError("V3 checkpoint architecture does not match expected config")
     stored_model_seed = _validated_model_seed(checkpoint["model_seed"])
     if not isinstance(checkpoint["dataset_hash"], str) or not checkpoint["dataset_hash"]:
         raise ValueError("V3 checkpoint dataset_hash is invalid")
@@ -749,18 +904,17 @@ def load_v3_checkpoint(
     if expected_model_seed is not None and _validated_model_seed(expected_model_seed) != stored_model_seed:
         raise ValueError("V3 checkpoint model_seed mismatch")
     if config is not None:
-        _authority_model_values(config)
         if stored_hash not in _config_hash_candidates(config):
             raise ValueError("V3 checkpoint config_semantic_sha256 mismatch")
     if expected_config_semantic_sha256 is not None and str(expected_config_semantic_sha256) != stored_hash:
         raise ValueError("V3 checkpoint config_semantic_sha256 mismatch")
     model = TemporalAlphaTransformer(
         input_dim=24,
-        history_len=int(checkpoint["history_len"]),
-        embed_dim=int(checkpoint["embed_dim"]),
-        num_heads=int(checkpoint["heads"]),
-        num_layers=int(checkpoint["layers"]),
-        dropout=float(checkpoint["dropout"]),
+        history_len=history_len,
+        embed_dim=embed_dim,
+        num_heads=heads,
+        num_layers=layers,
+        dropout=dropout,
     )
     if int(sum(parameter.numel() for parameter in model.parameters())) != 14113:
         raise ValueError("V3 checkpoint model shape does not have 14113 parameters")
@@ -772,6 +926,22 @@ def load_v3_checkpoint(
     metadata = {key: value for key, value in checkpoint.items() if key != "state_dict"}
     metadata["checkpoint_path"] = str(path)
     return model, metadata
+
+
+def load_v3_checkpoint(
+        checkpoint_path: str | Path,
+        config: Any | None = None,
+        **kwargs: Any) -> tuple[TemporalAlphaTransformer, dict[str, Any]]:
+    """Load a V3 checkpoint and normalize all contract failures to ValueError."""
+    path = Path(checkpoint_path).resolve()
+    try:
+        return _load_v3_checkpoint_impl(path, config=config, **kwargs)
+    except KeyboardInterrupt:
+        raise
+    except Exception as exc:
+        if isinstance(exc, ValueError) and "V3 checkpoint contract" in str(exc):
+            raise
+        raise ValueError(f"invalid V3 checkpoint contract at {path}: {exc}") from exc
 
 
 def load_alpha_model_checkpoint(

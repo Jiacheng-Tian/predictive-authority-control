@@ -28,6 +28,41 @@ def _dataset(seed: int = 1):
 
 
 class OracleDatasetTest(unittest.TestCase):
+    def test_metadata_requires_contiguous_zero_based_steps_and_increasing_time(self):
+        from pac.authority.dataset import OracleDataset
+
+        rows = []
+        for episode, split, seed in (("a", "train", 1), ("b", "val", 2)):
+            for step in range(2):
+                rows.append({
+                    "split": split,
+                    "scenario": 1,
+                    "environment_seed": seed,
+                    "episode_uid": episode,
+                    "step": step,
+                    "sample_time": 0.01 + step * 0.01,
+                    "teacher_alpha": 0.0,
+                    "oracle_best": 0.0,
+                    "oracle_worst": 1.0,
+                    "episode_fingerprint": f"fp-{episode}",
+                })
+        valid = pd.DataFrame(rows)
+        OracleDataset(np.zeros((4, 24), dtype=np.float32), np.zeros(4, dtype=np.float32), valid)
+        cases = {
+            "interleaved": valid.iloc[[0, 2, 1, 3]].reset_index(drop=True),
+            "missing_step": valid.assign(step=[0, 2, 0, 1]),
+            "non_integer_step": valid.assign(step=[0.0, 1.0, 0.0, 1.0]),
+            "non_increasing_time": valid.assign(sample_time=[0.02, 0.01, 0.01, 0.02]),
+        }
+        for name, metadata in cases.items():
+            with self.subTest(case=name):
+                with self.assertRaises(ValueError):
+                    OracleDataset(
+                        np.zeros((4, 24), dtype=np.float32),
+                        np.zeros(4, dtype=np.float32),
+                        metadata,
+                    )
+
     def test_schema_and_save_load_hash_tamper_and_nonempty_refusal(self):
         from pac.authority.dataset import load_oracle_dataset, save_oracle_dataset
 

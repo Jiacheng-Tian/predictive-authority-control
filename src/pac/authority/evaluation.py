@@ -158,6 +158,7 @@ def run_predictive_alpha_episode(
     xs, ys, zs, target_zs, z_errors = [], [], [], [], []
     active_values, alpha_values, raw_values = [], [], []
     forced_primary_values = []
+    solver_fallbacks, solver_deadlines = [], []
     history = []
     previous_alpha = 0.0
     done = False
@@ -185,6 +186,11 @@ def run_predictive_alpha_episode(
         authority_action = compute_controller_action(
             authority, authority_name, target, dynamics.eta, dynamics.nu, t, dynamics.dt, current
         )
+        telemetry = getattr(authority, "last_telemetry", {})
+        if not isinstance(telemetry, dict):
+            telemetry = {}
+        solver_fallbacks.append(float(str(telemetry.get("fallback_mode", "none")) != "none"))
+        solver_deadlines.append(float(bool(telemetry.get("deadline_missed", False))))
         authority_forced_primary = bool(
             getattr(authority, "force_primary_authority", False)
             or getattr(authority, "force_primary", False)
@@ -322,6 +328,8 @@ def run_predictive_alpha_episode(
         "aligned_metrics": aligned,
         "actuator_rate_limited_fraction_mean": float(np.mean(rate_limited_fractions)) if rate_limited_fractions else 0.0,
         "actuator_rate_limit_episode_mean": float(np.mean(rate_limited_fractions)) if rate_limited_fractions else 0.0,
+        "solver_fallback_step_fraction": float(np.mean(solver_fallbacks)) if solver_fallbacks else 0.0,
+        "solver_deadline_miss_step_fraction": float(np.mean(solver_deadlines)) if solver_deadlines else 0.0,
     })
     if alpha_bias_schedule:
         metrics["alpha_bias_schedule_json"] = json.dumps(alpha_bias_schedule, sort_keys=True)

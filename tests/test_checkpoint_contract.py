@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -169,6 +170,123 @@ class CheckpointContractTest(unittest.TestCase):
             torch.save({"state_dict": {}}, path)
             with self.assertRaises(ValueError):
                 load_v3_checkpoint(path)
+
+    def test_checkpoint_write_is_atomic_and_cleans_temp_on_failure(self):
+        from pac.authority.model import TemporalAlphaTransformer, save_v3_checkpoint
+        from pac.experiment_config import load_v3_config
+
+        config = load_v3_config(ROOT / "config" / "pac_v3.yaml").authority_model
+        model = TemporalAlphaTransformer(24, 16, 32, 4, 1, 0.1)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            target = root / "checkpoint.pt"
+            with patch("pac.authority.model.os.replace", side_effect=RuntimeError("rename failed")):
+                with self.assertRaisesRegex(RuntimeError, "rename failed"):
+                    save_v3_checkpoint(
+                        target,
+                        model,
+                        config=config,
+                        model_seed=31000,
+                        dataset_hash="dataset-hash",
+                        git_commit="HEAD",
+                        git_dirty=False,
+                        git_diff_sha256="clean",
+                        dependency_versions={"torch": "test"},
+                        training_metrics={
+                            "best_val_mse": 0.25,
+                            "best_epoch": 1,
+                            "epochs_ran": 1,
+                            "param_count": 14113,
+                        },
+                    )
+            self.assertFalse(target.exists())
+            self.assertEqual(list(root.glob(".checkpoint.pt.tmp-*")), [])
+
+    def test_corrupt_checkpoint_failures_include_path_and_do_not_swallow_keyboard_interrupt(self):
+        import torch
+        from pac.authority.model import load_v3_checkpoint
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            corrupt = Path(temp_dir) / "corrupt.pt"
+            corrupt.write_bytes(b"not-a-torch-checkpoint")
+            with self.assertRaises(ValueError) as corrupt_error:
+                load_v3_checkpoint(corrupt)
+            self.assertIn(str(corrupt), str(corrupt_error.exception))
+            self.assertIn("contract", str(corrupt_error.exception))
+            wrong_type = Path(temp_dir) / "wrong-type.pt"
+            torch.save([], wrong_type)
+            with self.assertRaises(ValueError) as wrong_type_error:
+                load_v3_checkpoint(wrong_type)
+            self.assertIn(str(wrong_type), str(wrong_type_error.exception))
+            self.assertIn("contract", str(wrong_type_error.exception))
+            overflow = Path(temp_dir) / "overflow.pt"
+            torch.save({"protocol_version": "formal_true_mpc_v3", "input_dim": 10**100}, overflow)
+            with self.assertRaises(ValueError) as overflow_error:
+                load_v3_checkpoint(overflow)
+            self.assertIn(str(overflow), str(overflow_error.exception))
+            self.assertIn("contract", str(overflow_error.exception))
+            with patch("pac.authority.model.torch.load", side_effect=KeyboardInterrupt):
+                with self.assertRaises(KeyboardInterrupt):
+                    load_v3_checkpoint(corrupt)
+
+    def test_checkpoint_aliases_and_expected_config_are_strict(self):
+        import torch
+        from dataclasses import replace
+        from pac.authority.model import (
+            TemporalAlphaTransformer,
+            load_v3_checkpoint,
+            save_v3_checkpoint,
+        )
+        from pac.experiment_config import load_v3_config
+
+        config = load_v3_config(ROOT / "config" / "pac_v3.yaml").authority_model
+        model = TemporalAlphaTransformer(24, 16, 32, 4, 1, 0.1)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source = Path(temp_dir) / "source.pt"
+            save_v3_checkpoint(
+                source,
+                model,
+                config=config,
+                model_seed=31000,
+                dataset_hash="dataset-hash",
+                git_commit="HEAD",
+                git_dirty=False,
+                git_diff_sha256="clean",
+                dependency_versions={"torch": "test"},
+                training_metrics={
+                    "best_val_mse": 0.25,
+                    "best_epoch": 1,
+                    "epochs_ran": 1,
+                    "param_count": 14113,
+                },
+            )
+            payload = torch.load(source, map_location="cpu", weights_only=True)
+            aliases = {
+                "architecture": "mlp",
+                "policy_architecture": "mlp",
+                "input_dim": 23,
+                "feature_mode": "other",
+                "history_len": 15,
+                "embed_dim": 16,
+                "transformer_embed_dim": 16,
+                "heads": 2,
+                "transformer_heads": 2,
+                "layers": 2,
+                "transformer_layers": 2,
+                "dropout": 0.2,
+                "model_dropout": 0.2,
+            }
+            for key, value in aliases.items():
+                wrong = dict(payload)
+                wrong[key] = value
+                path = Path(temp_dir) / f"alias-{key}.pt"
+                torch.save(wrong, path)
+                with self.subTest(alias=key):
+                    with self.assertRaises(ValueError):
+                        load_v3_checkpoint(path, config=config)
+            wrong_config = replace(config, alpha_gain=0.5)
+            with self.assertRaises(ValueError):
+                load_v3_checkpoint(source, config=wrong_config)
 
 
 if __name__ == "__main__":

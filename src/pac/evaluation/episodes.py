@@ -208,6 +208,7 @@ def run_fixed_controller_episode(
     true_currents, estimated_currents = [], []
     sample_times = []
     amplitude_clipped_fractions, rate_limited_fractions = [], []
+    solver_fallbacks, solver_deadlines = [], []
     headings, desired_headings, xs, ys, step_rows = [], [], [], [], []
     target_states = []
     rolls, pitches, desired_rolls, desired_pitches = [], [], [], []
@@ -242,6 +243,11 @@ def run_fixed_controller_episode(
             ),
             dtype=float,
         ).reshape(6)
+        telemetry = getattr(controller, "last_telemetry", {})
+        if not isinstance(telemetry, dict):
+            telemetry = {}
+        solver_fallbacks.append(float(str(telemetry.get("fallback_mode", "none")) != "none"))
+        solver_deadlines.append(float(bool(telemetry.get("deadline_missed", False))))
         done, info = env.step(action)
         sample_time = float(info.get("sample_time", t + dyn.dt))
         if aligned:
@@ -310,6 +316,8 @@ def run_fixed_controller_episode(
         "aligned_metrics": aligned,
         "actuator_rate_limited_fraction_mean": float(np.mean(rate_limited_fractions)) if rate_limited_fractions else 0.0,
         "actuator_rate_limit_episode_mean": float(np.mean(rate_limited_fractions)) if rate_limited_fractions else 0.0,
+        "solver_fallback_step_fraction": float(np.mean(solver_fallbacks)) if solver_fallbacks else 0.0,
+        "solver_deadline_miss_step_fraction": float(np.mean(solver_deadlines)) if solver_deadlines else 0.0,
     })
     ts = pd.DataFrame(make_timeseries(
         step_rows,

@@ -7,6 +7,8 @@ import unittest
 
 import numpy as np
 import pandas as pd
+import random
+import torch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -41,6 +43,51 @@ def _dataset(*, validation_extreme: bool = False):
 
 
 class V3TrainingTest(unittest.TestCase):
+    def test_training_restores_all_global_rng_and_determinism_state(self):
+        from pac.authority.model import train_alpha_model_v3
+        from pac.experiment_config import load_v3_config
+
+        config = load_v3_config(ROOT / "config" / "pac_v3.yaml").authority_model
+        random.seed(8123)
+        np.random.seed(8123)
+        torch.manual_seed(8123)
+        torch.use_deterministic_algorithms(False)
+        before_python = random.getstate()
+        before_numpy = np.random.get_state()
+        before_torch = torch.get_rng_state().clone()
+        expected_python = random.Random()
+        expected_python.setstate(before_python)
+        expected_python_value = expected_python.random()
+        expected_numpy = np.random.RandomState()
+        expected_numpy.set_state(before_numpy)
+        expected_numpy_value = float(expected_numpy.random_sample())
+        expected_torch = torch.Generator()
+        expected_torch.set_state(before_torch)
+        expected_torch_value = float(torch.rand((), generator=expected_torch).item())
+
+        train_alpha_model_v3(_dataset(), config, model_seed=31000, max_epochs=1, patience=1)
+
+        self.assertEqual(random.random(), expected_python_value)
+        self.assertEqual(float(np.random.random_sample()), expected_numpy_value)
+        self.assertEqual(float(torch.rand(()).item()), expected_torch_value)
+        self.assertTrue(torch.equal(torch.get_rng_state(), torch.get_rng_state()))
+        self.assertFalse(torch.are_deterministic_algorithms_enabled())
+
+        random.seed(8123)
+        np.random.seed(8123)
+        torch.manual_seed(8123)
+        before_python = random.getstate()
+        before_numpy = np.random.get_state()
+        before_torch = torch.get_rng_state().clone()
+        with self.assertRaises(ValueError):
+            train_alpha_model_v3(_dataset(), config, model_seed=31000, max_epochs=0, patience=1)
+        self.assertEqual(random.getstate(), before_python)
+        after_numpy = np.random.get_state()
+        self.assertEqual(after_numpy[0], before_numpy[0])
+        np.testing.assert_array_equal(after_numpy[1], before_numpy[1])
+        self.assertEqual(after_numpy[2:], before_numpy[2:])
+        self.assertTrue(torch.equal(torch.get_rng_state(), before_torch))
+
     def test_train_uses_train_only_normalization_and_episode_windows(self):
         from pac.authority.model import train_alpha_model_v3
         from pac.experiment_config import load_v3_config

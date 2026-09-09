@@ -6,9 +6,12 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import platform
 from pathlib import Path
+import shutil
 import sys
+import tempfile
 from typing import Any
 
 
@@ -17,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 from pac.authority.dataset import load_oracle_dataset
 from pac.authority.model import (
     _default_dependency_versions,
-    _default_git_commit,
+    _default_git_provenance,
     _semantic_config_hash,
     save_v3_checkpoint,
     train_alpha_model_v3,
@@ -36,8 +39,25 @@ def _reject_output(path: Path) -> None:
     resolved = path.resolve()
     if any(part.lower() == "results" for part in resolved.parts):
         raise ValueError("V3 training output must not be under a results path")
-    if resolved.exists() and (not resolved.is_dir() or any(resolved.iterdir())):
-        raise FileExistsError(f"output directory is not empty: {resolved}")
+    if resolved.exists():
+        raise FileExistsError(f"output directory already exists: {resolved}")
+
+
+def _reject_path_relationships(dataset_dir: Path, output_dir: Path) -> None:
+    if dataset_dir == output_dir:
+        raise ValueError("dataset and output directories must be different")
+    try:
+        output_dir.relative_to(dataset_dir)
+    except ValueError:
+        pass
+    else:
+        raise ValueError("output directory must not be inside dataset directory")
+    try:
+        dataset_dir.relative_to(output_dir)
+    except ValueError:
+        pass
+    else:
+        raise ValueError("dataset directory must not be inside output directory")
 
 
 def _read_dataset_manifest(dataset_dir: Path) -> dict[str, Any]:
@@ -84,7 +104,12 @@ def _profile_seeds(config, profile: str) -> list[int]:
     return required
 
 
-def _dry_manifest(config, dataset_manifest: dict[str, Any], config_path: Path) -> dict[str, Any]:
+def _dry_manifest(
+        config,
+        dataset_manifest: dict[str, Any],
+        config_path: Path,
+        git_provenance: dict[str, Any],
+) -> dict[str, Any]:
     versions = _default_dependency_versions()
     dataset_manifest_path = Path(dataset_manifest.get("_manifest_path", ""))
     return {
@@ -100,6 +125,7 @@ def _dry_manifest(config, dataset_manifest: dict[str, Any], config_path: Path) -
         "dependency_versions": versions,
         "dependency_hash": _dependency_hash(versions),
         "protocol_version": config.protocol.version,
+        **git_provenance,
     }
 
 
@@ -117,14 +143,25 @@ def main(argv: list[str] | None = None) -> int:
     config_path = _config_path(args.config).resolve()
     dataset_dir = Path(args.dataset_dir).resolve()
     output_dir = Path(args.out_dir).resolve()
+    _reject_path_relationships(dataset_dir, output_dir)
     _reject_output(output_dir)
     config = load_v3_config(config_path)
+    git_provenance = _default_git_provenance()
+    if (
+        args.profile == "formal"
+        and git_provenance["git_dirty"]
+        and os.environ.get("PAC_ALLOW_DIRTY_FORMAL") != "1"
+    ):
+        raise ValueError(
+            "formal V3 training requires a clean git worktree; "
+            "set PAC_ALLOW_DIRTY_FORMAL=1 only for debugging"
+        )
     if args.profile == "dry":
         _profile_seeds(config, "formal")
     dataset_manifest = _read_dataset_manifest(dataset_dir)
     dataset_manifest["_manifest_path"] = str(dataset_dir / "manifest.json")
     if args.profile == "dry":
-        print(json.dumps(_dry_manifest(config, dataset_manifest, config_path), sort_keys=True))
+        print(json.dumps(_dry_manifest(config, dataset_manifest, config_path, git_provenance), sort_keys=True))
         return 0
 
     seeds = _profile_seeds(config, args.profile)
@@ -134,52 +171,63 @@ def main(argv: list[str] | None = None) -> int:
     config_file_hash = _sha256(config_path)
     dataset_manifest_hash = _sha256(dataset_dir / "manifest.json")
     dependency_versions = _default_dependency_versions()
-    output_dir.mkdir(parents=True, exist_ok=True)
+    output_dir.parent.mkdir(parents=True, exist_ok=True)
+    temporary_output = Path(tempfile.mkdtemp(
+        prefix=f".{output_dir.name}.tmp-",
+        dir=output_dir.parent,
+    ))
     checkpoint_records: dict[str, dict[str, Any]] = {}
-    for seed in seeds:
-        seed_dir = output_dir / f"pac_train_seed_{seed}"
-        if seed_dir.exists() and any(seed_dir.iterdir()):
-            raise FileExistsError(f"seed output directory is not empty: {seed_dir}")
-        seed_dir.mkdir(parents=True, exist_ok=True)
-        model, history, metrics = train_alpha_model_v3(
-            dataset,
-            config.authority_model,
-            model_seed=seed,
-            max_epochs=3 if args.profile == "short" else 180,
-            patience=20,
-        )
-        history.to_csv(seed_dir / "training_history.csv", index=False)
-        summary = {
-            **metrics,
-            "dataset_hash": dataset_hash,
-            "config_semantic_sha256": config_hash,
-            "profile": args.profile,
-            "checkpoint": "checkpoint.pt",
-        }
-        (seed_dir / "training_summary.json").write_text(
-            json.dumps(summary, indent=2, sort_keys=True, default=_json_default),
-            encoding="utf-8",
-        )
-        save_v3_checkpoint(
-            seed_dir / "checkpoint.pt",
-            model,
-            config.authority_model,
-            model_seed=seed,
-            dataset_hash=dataset_hash,
-            config_semantic_sha256=config_hash,
-            git_commit=_default_git_commit(),
-            dependency_versions=dependency_versions,
-            training_metrics=metrics,
-        )
-        checkpoint_records[str(seed)] = {
-            "path": (seed_dir / "checkpoint.pt").relative_to(output_dir).as_posix(),
-            "sha256": _sha256(seed_dir / "checkpoint.pt"),
-            "model_seed": seed,
-            "dataset_hash": dataset_hash,
-        }
+    try:
+        for seed in seeds:
+            seed_dir = temporary_output / f"pac_train_seed_{seed}"
+            seed_dir.mkdir(parents=True, exist_ok=True)
+            if args.profile == "short":
+                max_epochs = min(3, int(config.training.max_epochs))
+                run_patience = min(int(config.training.patience), max_epochs)
+            else:
+                max_epochs = int(config.training.max_epochs)
+                run_patience = int(config.training.patience)
+            model, history, metrics = train_alpha_model_v3(
+                dataset,
+                config.authority_model,
+                model_seed=seed,
+                max_epochs=max_epochs,
+                patience=run_patience,
+            )
+            history.to_csv(seed_dir / "training_history.csv", index=False)
+            summary = {
+                **metrics,
+                "dataset_hash": dataset_hash,
+                "config_semantic_sha256": config_hash,
+                "profile": args.profile,
+                "checkpoint": "checkpoint.pt",
+            }
+            (seed_dir / "training_summary.json").write_text(
+                json.dumps(summary, indent=2, sort_keys=True, default=_json_default),
+                encoding="utf-8",
+            )
+            save_v3_checkpoint(
+                seed_dir / "checkpoint.pt",
+                model,
+                config.authority_model,
+                model_seed=seed,
+                dataset_hash=dataset_hash,
+                config_semantic_sha256=config_hash,
+                git_commit=git_provenance["git_commit"],
+                git_dirty=git_provenance["git_dirty"],
+                git_diff_sha256=git_provenance["git_diff_sha256"],
+                dependency_versions=dependency_versions,
+                training_metrics=metrics,
+            )
+            checkpoint_records[str(seed)] = {
+                "path": (seed_dir / "checkpoint.pt").relative_to(temporary_output).as_posix(),
+                "sha256": _sha256(seed_dir / "checkpoint.pt"),
+                "model_seed": seed,
+                "dataset_hash": dataset_hash,
+            }
 
-    command = [sys.executable, "scripts/train_pac.py", *(sys.argv[1:] if argv is None else argv)]
-    manifest = {
+        command = [sys.executable, "scripts/train_pac.py", *(sys.argv[1:] if argv is None else argv)]
+        manifest = {
         "protocol_version": config.protocol.version,
         "profile": args.profile,
         "config_path": config_path.relative_to(ROOT).as_posix() if config_path.is_relative_to(ROOT) else str(config_path),
@@ -188,7 +236,9 @@ def main(argv: list[str] | None = None) -> int:
         "dataset_dir": str(dataset_dir),
         "dataset_hash": dataset_hash,
         "dataset_manifest_sha256": dataset_manifest_hash,
-        "git_commit": _default_git_commit(),
+        "git_commit": git_provenance["git_commit"],
+        "git_dirty": git_provenance["git_dirty"],
+        "git_diff_sha256": git_provenance["git_diff_sha256"],
         "environment": {
             "python": platform.python_version(),
             "platform": platform.platform(),
@@ -201,11 +251,18 @@ def main(argv: list[str] | None = None) -> int:
         "checkpoint_hashes": {
             record["path"]: record["sha256"] for record in checkpoint_records.values()
         },
-    }
-    (output_dir / "manifest.json").write_text(
-        json.dumps(manifest, indent=2, sort_keys=True, default=_json_default),
-        encoding="utf-8",
-    )
+        }
+        (temporary_output / "manifest.json").write_text(
+            json.dumps(manifest, indent=2, sort_keys=True, default=_json_default),
+            encoding="utf-8",
+        )
+        if output_dir.exists():
+            raise FileExistsError(f"output directory appeared during training: {output_dir}")
+        os.replace(temporary_output, output_dir)
+        temporary_output = None
+    finally:
+        if temporary_output is not None:
+            shutil.rmtree(temporary_output, ignore_errors=True)
     print(json.dumps(manifest, sort_keys=True, default=_json_default))
     return 0
 
