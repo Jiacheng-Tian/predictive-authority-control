@@ -41,20 +41,28 @@ class EpisodePairingTest(unittest.TestCase):
         self.assertTrue(all(row["model_seed"] is None for row in baseline))
         self.assertTrue(all(row["episode_uid"] == "scn1_env41000" for row in rows))
 
-    def test_paired_grid_accepts_zero_seeds_and_positive_scenarios(self):
+    def test_paired_grid_accepts_zero_seeds_and_formal_scenarios_only(self):
         from pac.evaluation.protocol import build_paired_evaluation_grid
 
         rows = build_paired_evaluation_grid(
-            model_seeds=[0], episode_seeds=[1], scenarios=[4]
+            model_seeds=[0], episode_seeds=[1], scenarios=[1, 2, 3]
         )
         self.assertEqual({row["model_seed"] for row in rows if row["row_type"] == "learned"}, {0})
         self.assertEqual({row["episode_seed"] for row in rows}, {1})
-        self.assertEqual({row["scenario_id"] for row in rows}, {4})
-        self.assertEqual({row["episode_uid"] for row in rows}, {"scn4_env1"})
+        self.assertEqual({row["scenario_id"] for row in rows}, {1, 2, 3})
+        self.assertEqual(
+            {row["episode_uid"] for row in rows},
+            {"scn1_env1", "scn2_env1", "scn3_env1"},
+        )
         with self.assertRaises(ValueError):
             build_paired_evaluation_grid(model_seeds=[-1], episode_seeds=[1], scenarios=[1])
         with self.assertRaises(ValueError):
             build_paired_evaluation_grid(model_seeds=[0], episode_seeds=[-1], scenarios=[1])
+        for invalid_scenario in (0, 4, 1.0):
+            with self.assertRaises(ValueError):
+                build_paired_evaluation_grid(
+                    model_seeds=[0], episode_seeds=[1], scenarios=[invalid_scenario]
+                )
 
     def test_episode_spec_rejects_float_integer_fields(self):
         from pac.evaluation.episode_spec import build_episode_spec

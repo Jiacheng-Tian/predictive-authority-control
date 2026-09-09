@@ -49,6 +49,8 @@ def build_paired_evaluation_grid(model_seeds, episode_seeds, scenarios) -> list[
         episode_seeds, "episode_seeds", minimum=0, maximum=_MAX_SEED
     )
     scenario_values = _unique_integer_values(scenarios, "scenarios", minimum=1)
+    if any(scenario not in {1, 2, 3} for scenario in scenario_values):
+        raise ValueError("scenarios must be one of 1, 2, or 3")
     if set(model_values) & set(episode_values):
         raise ValueError("model_seeds and episode_seeds must be disjoint")
     rows: list[dict] = []
