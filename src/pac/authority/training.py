@@ -8,7 +8,11 @@ import pandas as pd
 from pac.authority.evaluation import blend_actions_with_predicted_alpha
 from pac.authority.features import build_alpha_feature, wrap_angle
 from pac.authority.model import train_alpha_model
-from pac.authority.oracle import OracleSettings, choose_rollout_oracle_alpha
+from pac.authority.oracle import (
+    OracleSettings,
+    choose_rollout_oracle_alpha,
+    validate_formal_oracle_contract,
+)
 from pac.authority.dataset import episode_fingerprint
 from pac.evaluation.episode_spec import build_episode_spec
 from pac.evaluation.episodes import build_controller, compute_controller_action
@@ -248,6 +252,8 @@ def _collection_plan(config, profile: str) -> list[tuple[str, int, int]]:
 
 def collect_teacher_dataset_v3(config, profile: str = "formal"):
     """Collect the true-MPC v3 rollout teacher dataset once per episode."""
+    if str(profile).strip().lower() in {"short", "formal"}:
+        validate_formal_oracle_contract(config.oracle)
     plans = _collection_plan(config, profile)
     dt = float(config.environment.dt)
     settings = OracleSettings(
@@ -333,8 +339,34 @@ def collect_teacher_dataset_v3(config, profile: str = "formal"):
                 plan = getattr(authority, "last_plan", None)
                 if callable(plan):
                     plan = plan()
-                if plan is None:
-                    plan = np.asarray(authority_action, dtype=float).reshape(1, 6)
+                telemetry = getattr(authority, "last_telemetry", None)
+                if telemetry is None:
+                    telemetry = getattr(authority, "telemetry", {})
+                telemetry = telemetry if isinstance(telemetry, dict) else {}
+                plan_valid = False
+                if plan is not None:
+                    try:
+                        plan_array = np.asarray(plan, dtype=float)
+                        plan_valid = (
+                            plan_array.ndim == 2
+                            and plan_array.shape[1] == 6
+                            and plan_array.shape[0] > 0
+                            and np.isfinite(plan_array).all()
+                        )
+                    except (TypeError, ValueError, OverflowError):
+                        plan_valid = False
+                if (
+                    not plan_valid
+                    or not bool(telemetry.get("accepted", False))
+                    or str(telemetry.get("fallback_mode", "")) != "none"
+                ):
+                    raise RuntimeError(
+                        "fresh accepted MPC plan required "
+                        f"episode={spec.episode_uid} step={step}: "
+                        f"plan={'present' if plan_valid else 'missing/invalid'} "
+                        f"accepted={telemetry.get('accepted', False)} "
+                        f"fallback_mode={telemetry.get('fallback_mode', '')}"
+                    )
 
                 decision = choose_rollout_oracle_alpha(
                     current_eta=dynamics.eta,

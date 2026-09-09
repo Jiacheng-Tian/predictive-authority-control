@@ -13,6 +13,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 from pac.authority.dataset import save_oracle_dataset
+from pac.authority.oracle import validate_formal_oracle_contract
 from pac.authority.training import collect_teacher_dataset_v3
 from pac.experiment_config import load_v3_config
 
@@ -85,6 +86,8 @@ def main(argv: list[str] | None = None) -> int:
     output = Path(args.out_dir).resolve()
     _reject_output_path(output)
     config = load_v3_config(config_path)
+    if args.profile in {"dry", "short", "formal"}:
+        validate_formal_oracle_contract(config.oracle)
     plan = _plan(config, args.profile)
     if args.profile == "dry":
         print(json.dumps(plan, sort_keys=True))

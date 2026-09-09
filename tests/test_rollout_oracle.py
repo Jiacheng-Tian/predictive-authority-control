@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 
@@ -105,6 +107,40 @@ class RolloutOracleTest(unittest.TestCase):
         np.testing.assert_array_equal(simulator.dynamics.eta, eta_before)
         np.testing.assert_array_equal(simulator.dynamics.nu, nu_before)
         np.testing.assert_array_equal(simulator.actuator._previous_applied, applied_before)
+
+    def test_v3_collection_rejects_missing_or_reused_mpc_plan(self):
+        from pac.authority.training import collect_teacher_dataset_v3
+        from pac.experiment_config import load_v3_config
+
+        config = load_v3_config(Path(__file__).resolve().parents[1] / "config" / "pac_v3.yaml")
+
+        class FakeController:
+            def __init__(self, authority=False, mode="none"):
+                self.authority = authority
+                self.mode = mode
+                self.last_plan = np.zeros((20, 6)) if authority else None
+                self.last_telemetry = {
+                    "accepted": mode == "none",
+                    "fallback_mode": mode,
+                }
+
+            def reset(self):
+                pass
+
+            def set_trajectory3d(self, enabled=True):
+                pass
+
+            def compute(self, target, eta, nu, *, t=None, current_prediction=None):
+                return np.zeros(6)
+
+        for mode in ("solver_failure", "reuse_plan"):
+            with self.subTest(mode=mode):
+                def build(name, current_mode=mode):
+                    return name, FakeController(authority="mpc" in name, mode=current_mode if "mpc" in name else "none")
+
+                with patch("pac.authority.training.build_controller", side_effect=build):
+                    with self.assertRaisesRegex(RuntimeError, r"episode=.*step=0"):
+                        collect_teacher_dataset_v3(config, "short")
 
 
 if __name__ == "__main__":

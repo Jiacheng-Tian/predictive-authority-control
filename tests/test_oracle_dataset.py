@@ -48,6 +48,42 @@ class OracleDatasetTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 load_oracle_dataset(output)
 
+    def test_save_hash_uses_float_roundtrip_metadata_and_loads_short_style_rows(self):
+        from pac.authority.dataset import load_oracle_dataset, save_oracle_dataset
+
+        dataset = _dataset()
+        dataset.metadata.loc[0, "sample_time"] = 0.12345678901234567
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output = Path(temp_dir) / "oracle"
+            save_oracle_dataset(dataset, output, {"config_hash": "abc"})
+            loaded = load_oracle_dataset(output)
+            self.assertEqual(loaded.features.dtype, np.dtype("float32"))
+            self.assertEqual(loaded.labels.dtype, np.dtype("float32"))
+            self.assertAlmostEqual(
+                loaded.metadata.loc[0, "sample_time"],
+                dataset.metadata.loc[0, "sample_time"],
+                places=15,
+            )
+
+    def test_save_requires_both_splits_and_rejects_cross_episode_fingerprint(self):
+        from pac.authority.dataset import save_oracle_dataset
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            only_train = _dataset()
+            only_train.metadata["split"] = "train"
+            with self.assertRaises(ValueError):
+                save_oracle_dataset(only_train, Path(temp_dir) / "only-train", {})
+
+            duplicate = _dataset()
+            duplicate.metadata.loc[1, "episode_fingerprint"] = duplicate.metadata.loc[0, "episode_fingerprint"]
+            with self.assertRaises(ValueError):
+                save_oracle_dataset(duplicate, Path(temp_dir) / "duplicate", {})
+
+            cross_split = _dataset()
+            cross_split.metadata.loc[1, "episode_uid"] = cross_split.metadata.loc[0, "episode_uid"]
+            with self.assertRaises(ValueError):
+                save_oracle_dataset(cross_split, Path(temp_dir) / "cross-split", {})
+
     def test_episode_fingerprint_is_stable_and_unique(self):
         from pac.authority.dataset import assert_unique_episode_fingerprints, episode_fingerprint
         from pac.evaluation.episode_spec import build_episode_spec

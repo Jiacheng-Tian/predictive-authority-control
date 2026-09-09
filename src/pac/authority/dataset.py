@@ -83,6 +83,13 @@ def _validate_metadata(metadata: pd.DataFrame, length: int) -> pd.DataFrame:
         raise ValueError(f"metadata is missing required columns: {', '.join(missing)}")
     if metadata.isna().any().any():
         raise ValueError("metadata must not contain null values")
+    split_values = set(metadata["split"].tolist())
+    if not split_values.issubset({"train", "val"}):
+        raise ValueError("metadata split values must be 'train' or 'val'")
+    for column in ("episode_uid", "episode_fingerprint"):
+        values = metadata[column].tolist()
+        if any(not isinstance(value, str) or not value for value in values):
+            raise ValueError(f"metadata {column} values must be non-empty strings")
     for column in metadata.columns:
         values = metadata[column]
         if pd.api.types.is_numeric_dtype(values):
@@ -179,10 +186,11 @@ def assert_unique_episode_fingerprints(values: pd.DataFrame | Iterable[Any]) -> 
 def assert_episode_split_disjoint(metadata: pd.DataFrame) -> None:
     """Ensure every episode belongs to exactly one train/validation split."""
     _validate_metadata(metadata, len(metadata))
-    grouped = metadata.groupby("episode_fingerprint", sort=False)["split"].nunique()
-    if bool((grouped > 1).any()):
-        raise ValueError("an episode fingerprint cannot occur in multiple splits")
-    split_values = set(str(value) for value in metadata["split"])
+    for key in ("environment_seed", "episode_uid"):
+        grouped = metadata.groupby(key, sort=False)["split"].nunique()
+        if bool((grouped > 1).any()):
+            raise ValueError(f"an episode {key} cannot occur in multiple splits")
+    split_values = set(metadata["split"].tolist())
     if not {"train", "val"}.issubset(split_values):
         raise ValueError("metadata must contain train and val splits")
 
@@ -255,6 +263,8 @@ def save_oracle_dataset(
     """Atomically save a dataset, refusing to overwrite non-empty output."""
     if not isinstance(dataset, OracleDataset):
         dataset = OracleDataset(**dataset)
+    assert_episode_split_disjoint(dataset.metadata)
+    assert_unique_episode_fingerprints(dataset.metadata)
     target = Path(out_dir)
     if target.exists() and any(target.iterdir()):
         raise FileExistsError(f"output directory is not empty: {target}")
@@ -281,7 +291,17 @@ def save_oracle_dataset(
     try:
         np.save(temp_dir / "features.npy", dataset.features, allow_pickle=False)
         np.save(temp_dir / "labels.npy", dataset.labels, allow_pickle=False)
-        dataset.metadata.to_csv(temp_dir / "metadata.csv", index=False)
+        dataset.metadata.to_csv(
+            temp_dir / "metadata.csv", index=False, float_format="%.17g"
+        )
+        # Hash exactly what a later load observes on disk, while retaining the
+        # original NPY bytes and dtypes.
+        disk_metadata = pd.read_csv(temp_dir / "metadata.csv")
+        disk_dataset = OracleDataset(dataset.features, dataset.labels, disk_metadata)
+        assert_episode_split_disjoint(disk_dataset.metadata)
+        assert_unique_episode_fingerprints(disk_dataset.metadata)
+        dataset_hash = canonical_dataset_hash(disk_dataset, source_provenance)
+        manifest["dataset_hash"] = dataset_hash
         file_hashes = {
             name: _file_sha256(temp_dir / name)
             for name in ("features.npy", "labels.npy", "metadata.csv")
@@ -328,6 +348,8 @@ def load_oracle_dataset(out_dir: str | Path) -> OracleDataset:
         )
     except (OSError, ValueError, TypeError) as exc:
         raise ValueError("invalid oracle dataset content") from exc
+    assert_episode_split_disjoint(dataset.metadata)
+    assert_unique_episode_fingerprints(dataset.metadata)
     expected_dataset_hash = manifest.get("dataset_hash")
     actual_dataset_hash = canonical_dataset_hash(dataset, manifest.get("provenance", {}))
     if expected_dataset_hash != actual_dataset_hash:

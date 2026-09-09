@@ -18,6 +18,21 @@ from pac.authority.features import wrap_angle
 from pac.simulation.actuators import ActuatorLimits, SharedActuator
 
 
+FORMAL_ORACLE_ALPHA_GRID = (
+    0.0,
+    0.1,
+    0.2,
+    0.3,
+    0.4,
+    0.5,
+    0.6,
+    0.7,
+    0.8,
+    0.9,
+    1.0,
+)
+
+
 def _finite_vector(value: Any, shape: tuple[int, ...], name: str) -> np.ndarray:
     try:
         result = np.asarray(value, dtype=float)
@@ -177,6 +192,18 @@ def _coerce_settings(settings: OracleSettings | Any | None) -> OracleSettings:
         )
     }
     return OracleSettings(**values)
+
+
+def validate_formal_oracle_contract(settings: OracleSettings | Any) -> OracleSettings:
+    """Validate the fixed H20/grid contract used by formal and short runs."""
+    resolved = _coerce_settings(settings)
+    if resolved.horizon != 20:
+        raise ValueError("formal oracle contract requires horizon=20")
+    if resolved.alpha_grid != FORMAL_ORACLE_ALPHA_GRID:
+        raise ValueError(
+            "formal oracle contract requires alpha_grid=(0.0, 0.1, ..., 1.0) with 11 points"
+        )
+    return resolved
 
 
 def _controller_action(controller: Any, target, eta, nu, stamp: float, current) -> np.ndarray:
@@ -453,4 +480,10 @@ def choose_rollout_oracle_alpha(
     )
 
 
-__all__ = ["OracleDecision", "OracleSettings", "choose_rollout_oracle_alpha"]
+__all__ = [
+    "FORMAL_ORACLE_ALPHA_GRID",
+    "OracleDecision",
+    "OracleSettings",
+    "choose_rollout_oracle_alpha",
+    "validate_formal_oracle_contract",
+]
