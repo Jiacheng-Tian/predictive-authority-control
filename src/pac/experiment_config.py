@@ -67,6 +67,18 @@ class MPCConfig:
 
 
 @dataclass(frozen=True)
+class OracleConfig:
+    horizon: int
+    alpha_grid: tuple[float, ...]
+    xy_weight: float
+    z_weight: float
+    heading_weight: float
+    control_delta_weight: float
+    saturation_weight: float
+    terminal_scale: float
+
+
+@dataclass(frozen=True)
 class TrainingConfig:
     oracle_train_seeds: tuple[int, ...]
     oracle_val_seeds: tuple[int, ...]
@@ -104,6 +116,7 @@ class V3ExperimentConfig:
     controller: ControllerConfig
     actuator: ActuatorConfig
     mpc: MPCConfig
+    oracle: OracleConfig
     training: TrainingConfig
     evaluation: EvaluationConfig
     sspo: SSPOConfig
@@ -189,6 +202,12 @@ def _float_vector(value: Any, name: str, length: int) -> tuple[float, ...]:
     if len(result) != length:
         raise ValueError(f"{name} must contain exactly {length} values")
     return result
+
+
+def _float_sequence(value: Any, name: str) -> tuple[float, ...]:
+    if not isinstance(value, (list, tuple)) or not value:
+        raise ValueError(f"{name} must be a non-empty list")
+    return tuple(_float_value(item, name) for item in value)
 
 
 def load_v3_config(path: str | Path) -> V3ExperimentConfig:
@@ -294,6 +313,52 @@ def load_v3_config(path: str | Path) -> V3ExperimentConfig:
     if any(value <= 0.0 for value in (*mpc.q_diag, *mpc.r_diag, *mpc.s_diag)):
         raise ValueError("mpc diagonal weights must be positive")
 
+    oracle_data = _section(data, "oracle")
+    alpha_grid = _float_sequence(
+        _required(oracle_data, "alpha_grid"), "oracle.alpha_grid"
+    )
+    if len(alpha_grid) < 2:
+        raise ValueError("oracle.alpha_grid must contain at least two values")
+    if any(alpha < 0.0 or alpha > 1.0 for alpha in alpha_grid):
+        raise ValueError("oracle.alpha_grid values must be in [0, 1]")
+    if alpha_grid[0] != 0.0 or alpha_grid[-1] != 1.0:
+        raise ValueError("oracle.alpha_grid must include 0 and 1 as endpoints")
+    if any(right <= left for left, right in zip(alpha_grid, alpha_grid[1:])):
+        raise ValueError("oracle.alpha_grid must be strictly increasing")
+    oracle = OracleConfig(
+        horizon=_int_value(_required(oracle_data, "horizon"), "oracle.horizon"),
+        alpha_grid=alpha_grid,
+        xy_weight=_float_value(_required(oracle_data, "xy_weight"), "oracle.xy_weight"),
+        z_weight=_float_value(_required(oracle_data, "z_weight"), "oracle.z_weight"),
+        heading_weight=_float_value(
+            _required(oracle_data, "heading_weight"), "oracle.heading_weight"
+        ),
+        control_delta_weight=_float_value(
+            _required(oracle_data, "control_delta_weight"),
+            "oracle.control_delta_weight",
+        ),
+        saturation_weight=_float_value(
+            _required(oracle_data, "saturation_weight"), "oracle.saturation_weight"
+        ),
+        terminal_scale=_float_value(
+            _required(oracle_data, "terminal_scale"), "oracle.terminal_scale"
+        ),
+    )
+    if not 1 <= oracle.horizon <= 200:
+        raise ValueError("oracle.horizon must be in [1, 200]")
+    if any(
+        weight < 0.0
+        for weight in (
+            oracle.xy_weight,
+            oracle.z_weight,
+            oracle.heading_weight,
+            oracle.control_delta_weight,
+            oracle.saturation_weight,
+            oracle.terminal_scale,
+        )
+    ):
+        raise ValueError("oracle weights must be non-negative")
+
     training_data = _section(data, "training")
     training = TrainingConfig(
         oracle_train_seeds=_seed_tuple(_required(training_data, "oracle_train_seeds"), "oracle_train"),
@@ -337,6 +402,7 @@ def load_v3_config(path: str | Path) -> V3ExperimentConfig:
         controller=controller,
         actuator=actuator,
         mpc=mpc,
+        oracle=oracle,
         training=training,
         evaluation=evaluation,
         sspo=sspo,

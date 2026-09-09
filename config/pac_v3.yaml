@@ -38,6 +38,16 @@ mpc:
   accept_inaccurate_residual: 0.001
   max_consecutive_plan_reuse: 3
 
+oracle:
+  horizon: 20
+  alpha_grid: [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+  xy_weight: 1.0
+  z_weight: 0.7
+  heading_weight: 0.08
+  control_delta_weight: 0.01
+  saturation_weight: 0.02
+  terminal_scale: 2.0
+
 training:
   oracle_train_seeds: [11000, 11001, 11002, 11003, 11004, 11005, 11006, 11007]
   oracle_val_seeds: [12000, 12001]

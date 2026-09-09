@@ -8,8 +8,12 @@ import pandas as pd
 from pac.authority.evaluation import blend_actions_with_predicted_alpha
 from pac.authority.features import build_alpha_feature, wrap_angle
 from pac.authority.model import train_alpha_model
+from pac.authority.oracle import OracleSettings, choose_rollout_oracle_alpha
+from pac.authority.dataset import episode_fingerprint
+from pac.evaluation.episode_spec import build_episode_spec
 from pac.evaluation.episodes import build_controller, compute_controller_action
 from pac.simulation.core import AUVSimulator
+from pac.simulation.observations import CausalCurrentEstimator
 
 
 def tracking_cost(
@@ -140,15 +144,16 @@ def collect_teacher_dataset(
                 return environment._action_to_wrench(action)[0]
 
             def dynamics_stepper(eta0, nu0, wrench, current):
-                saved_eta = environment.dynamics.eta.copy()
-                saved_nu = environment.dynamics.nu.copy()
-                environment.dynamics.eta = np.asarray(eta0, dtype=float).copy()
-                environment.dynamics.nu = np.asarray(nu0, dtype=float).copy()
-                predicted_eta, predicted_nu = environment.dynamics.step(wrench, current)
+                predicted_eta, predicted_nu = environment.dynamics.predict_step(
+                    np.asarray(eta0, dtype=float).copy(),
+                    np.asarray(nu0, dtype=float).copy(),
+                    wrench,
+                    current,
+                )
                 for _ in range(max(0, int(oracle_horizon_steps) - 1)):
-                    predicted_eta, predicted_nu = environment.dynamics.step(wrench, current)
-                environment.dynamics.eta = saved_eta
-                environment.dynamics.nu = saved_nu
+                    predicted_eta, predicted_nu = environment.dynamics.predict_step(
+                        predicted_eta, predicted_nu, wrench, current
+                    )
                 return predicted_eta, predicted_nu
 
             while not done:
@@ -225,4 +230,173 @@ def collect_teacher_dataset(
     )
 
 
-__all__ = ["choose_oracle_alpha", "collect_teacher_dataset", "train_alpha_model"]
+def _collection_plan(config, profile: str) -> list[tuple[str, int, int]]:
+    profile = str(profile).strip().lower()
+    if profile == "short":
+        return [("train", 11000, 20), ("val", 12000, 20)]
+    if profile == "formal":
+        steps = int(config.environment.steps)
+        return [
+            ("train", int(seed), steps)
+            for seed in config.training.oracle_train_seeds
+        ] + [
+            ("val", int(seed), steps)
+            for seed in config.training.oracle_val_seeds
+        ]
+    raise ValueError("profile must be 'short' or 'formal'")
+
+
+def collect_teacher_dataset_v3(config, profile: str = "formal"):
+    """Collect the true-MPC v3 rollout teacher dataset once per episode."""
+    plans = _collection_plan(config, profile)
+    dt = float(config.environment.dt)
+    settings = OracleSettings(
+        horizon=config.oracle.horizon,
+        alpha_grid=config.oracle.alpha_grid,
+        xy_weight=config.oracle.xy_weight,
+        z_weight=config.oracle.z_weight,
+        heading_weight=config.oracle.heading_weight,
+        control_delta_weight=config.oracle.control_delta_weight,
+        saturation_weight=config.oracle.saturation_weight,
+        terminal_scale=config.oracle.terminal_scale,
+    )
+    features: list[np.ndarray] = []
+    labels: list[float] = []
+    rows: list[dict[str, object]] = []
+    for split, seed, steps in plans:
+        # A new simulator and fresh controller pair per episode keep warm-start
+        # and actuator state out of the next seed's teacher labels.
+        # Formal collection evaluates all configured scenarios for each seed.
+        scenarios = (1,) if profile == "short" else tuple(config.environment.scenarios)
+        for scenario in scenarios:
+            spec = build_episode_spec(scenario, seed, steps, dt)
+            environment = AUVSimulator(
+                scenario=scenario,
+                max_steps=steps,
+                mass_scale_xy=float(config.environment.mass_scale_xy),
+                damping_scale_xy=float(config.environment.damping_scale_xy),
+                current_amplitude_scale=float(config.environment.current_amplitude_scale),
+                current_frequency_scale=float(config.environment.current_frequency_scale),
+                vertical_current=float(config.environment.vertical_current),
+                vehicle_profile=str(config.environment.vehicle_profile),
+                thruster_layout=str(config.environment.thruster_layout),
+                dt=dt,
+                actuator_command_min=float(config.actuator.command_min),
+                actuator_command_max=float(config.actuator.command_max),
+                actuator_max_delta_per_step=float(config.actuator.max_delta_per_step),
+            )
+            environment.reset(episode_spec=spec)
+            primary_name, primary = build_controller(config.controller.primary)
+            authority_name, authority = build_controller(config.controller.authority)
+            for controller in (primary, authority):
+                controller.reset()
+                controller.set_trajectory3d(True)
+            estimator = CausalCurrentEstimator(
+                spec.current_delay_steps,
+                spec.current_estimation_noise,
+            )
+            estimator.reset(environment.privileged_state[:3])
+            fingerprint = episode_fingerprint(spec)
+            episode_end = float(steps) * dt
+            previous_applied = np.zeros(6, dtype=float)
+            done = False
+            while not done:
+                dynamics = environment.dynamics
+                step = int(environment.current_step)
+                stamp = float(step * dt)
+                target = environment._get_target(stamp)
+                true_current = np.asarray(
+                    environment._current_for_dynamics(environment._generate_current(stamp)),
+                    dtype=float,
+                )
+                estimated_current = estimator.estimate(true_current, step)
+                primary_action = compute_controller_action(
+                    primary,
+                    primary_name,
+                    target,
+                    dynamics.eta,
+                    dynamics.nu,
+                    stamp,
+                    dt,
+                    estimated_current,
+                )
+                authority_action = compute_controller_action(
+                    authority,
+                    authority_name,
+                    target,
+                    dynamics.eta,
+                    dynamics.nu,
+                    stamp,
+                    dt,
+                    estimated_current,
+                )
+                plan = getattr(authority, "last_plan", None)
+                if callable(plan):
+                    plan = plan()
+                if plan is None:
+                    plan = np.asarray(authority_action, dtype=float).reshape(1, 6)
+
+                decision = choose_rollout_oracle_alpha(
+                    current_eta=dynamics.eta,
+                    current_nu=dynamics.nu,
+                    t=stamp,
+                    previous_applied=previous_applied,
+                    primary_controller=primary,
+                    mpc_controller=authority,
+                    mpc_plan=plan,
+                    simulator=environment,
+                    current_provider=lambda future_t, env=environment: env._current_for_dynamics(
+                        env._generate_current(float(future_t))
+                    ),
+                    actuator_limits=environment.actuator.limits,
+                    settings=settings,
+                )
+                feature = build_alpha_feature(
+                    target,
+                    dynamics.eta,
+                    dynamics.nu,
+                    primary_action,
+                    authority_action,
+                    estimated_current[:2],
+                    stamp,
+                    episode_end,
+                    "state_phase",
+                )
+                features.append(feature)
+                labels.append(float(decision.alpha))
+                action, _ = blend_actions_with_predicted_alpha(
+                    primary_action,
+                    authority_action,
+                    decision.alpha,
+                )
+                done, info = environment.step(action)
+                previous_applied = np.asarray(info["applied_action"], dtype=float).copy()
+                rows.append({
+                    "split": split,
+                    "scenario": scenario,
+                    "environment_seed": seed,
+                    "episode_uid": spec.episode_uid,
+                    "step": step,
+                    "sample_time": float(info.get("sample_time", stamp + dt)),
+                    "teacher_alpha": float(decision.alpha),
+                    "oracle_best": float(decision.best_cost),
+                    "oracle_worst": float(decision.worst_cost),
+                    "episode_fingerprint": fingerprint,
+                    "primary_controller": primary_name,
+                    "authority_controller": authority_name,
+                })
+    from pac.authority.dataset import OracleDataset
+
+    return OracleDataset(
+        np.asarray(features, dtype=np.float32),
+        np.asarray(labels, dtype=np.float32),
+        pd.DataFrame(rows),
+    )
+
+
+__all__ = [
+    "choose_oracle_alpha",
+    "collect_teacher_dataset",
+    "collect_teacher_dataset_v3",
+    "train_alpha_model",
+]
