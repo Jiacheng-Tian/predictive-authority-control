@@ -8,7 +8,7 @@ import sys
 
 from pac.authority.evaluation import blend_actions_with_predicted_alpha
 from pac.authority.features import build_alpha_feature, wrap_angle
-from pac.authority.model import train_alpha_model
+from pac.authority.model import train_alpha_model, train_alpha_model_v3
 from pac.authority.oracle import (
     OracleSettings,
     choose_rollout_oracle_alpha,
@@ -471,4 +471,5 @@ __all__ = [
     "collect_teacher_dataset_v3",
     "normalize_oracle_profile",
     "train_alpha_model",
+    "train_alpha_model_v3",
 ]

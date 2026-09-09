@@ -19,6 +19,19 @@ controller:
   primary: real10kg_smc_steady
   authority: real10kg_mpc_ltv_v3
 
+authority_model:
+  architecture: transformer
+  feature_mode: state_phase
+  history_len: 16
+  embed_dim: 32
+  heads: 4
+  layers: 1
+  dropout: 0.1
+  alpha_gain: 1.2
+  alpha_smoothing: 0.5
+  alpha_rate_limit: 0.0125
+  alpha_deadband: 0.0
+
 actuator:
   command_min: -1.0
   command_max: 1.0

@@ -44,6 +44,23 @@ class ControllerConfig:
 
 
 @dataclass(frozen=True)
+class AuthorityModelConfig:
+    """Frozen authority-model architecture and alpha-filter contract."""
+
+    architecture: str
+    feature_mode: str
+    history_len: int
+    embed_dim: int
+    heads: int
+    layers: int
+    dropout: float
+    alpha_gain: float
+    alpha_smoothing: float
+    alpha_rate_limit: float
+    alpha_deadband: float
+
+
+@dataclass(frozen=True)
 class ActuatorConfig:
     command_min: float
     command_max: float
@@ -114,6 +131,7 @@ class V3ExperimentConfig:
     protocol: ProtocolConfig
     environment: EnvironmentConfig
     controller: ControllerConfig
+    authority_model: AuthorityModelConfig
     actuator: ActuatorConfig
     mpc: MPCConfig
     oracle: OracleConfig
@@ -266,6 +284,67 @@ def load_v3_config(path: str | Path) -> V3ExperimentConfig:
         authority=_non_empty_string(_required(controller_data, "authority"), "controller.authority"),
     )
 
+    authority_model_data = _section(data, "authority_model")
+    authority_model = AuthorityModelConfig(
+        architecture=_non_empty_string(
+            _required(authority_model_data, "architecture"), "authority_model.architecture"
+        ),
+        feature_mode=_non_empty_string(
+            _required(authority_model_data, "feature_mode"), "authority_model.feature_mode"
+        ),
+        history_len=_int_value(
+            _required(authority_model_data, "history_len"), "authority_model.history_len"
+        ),
+        embed_dim=_int_value(
+            _required(authority_model_data, "embed_dim"), "authority_model.embed_dim"
+        ),
+        heads=_int_value(_required(authority_model_data, "heads"), "authority_model.heads"),
+        layers=_int_value(_required(authority_model_data, "layers"), "authority_model.layers"),
+        dropout=_float_value(
+            _required(authority_model_data, "dropout"), "authority_model.dropout"
+        ),
+        alpha_gain=_float_value(
+            _required(authority_model_data, "alpha_gain"), "authority_model.alpha_gain"
+        ),
+        alpha_smoothing=_float_value(
+            _required(authority_model_data, "alpha_smoothing"),
+            "authority_model.alpha_smoothing",
+        ),
+        alpha_rate_limit=_float_value(
+            _required(authority_model_data, "alpha_rate_limit"),
+            "authority_model.alpha_rate_limit",
+        ),
+        alpha_deadband=_float_value(
+            _required(authority_model_data, "alpha_deadband"),
+            "authority_model.alpha_deadband",
+        ),
+    )
+    if authority_model.architecture != "transformer":
+        raise ValueError("authority_model.architecture must be transformer")
+    if authority_model.feature_mode != "state_phase":
+        raise ValueError("authority_model.feature_mode must be state_phase")
+    if not 1 <= authority_model.history_len <= 512:
+        raise ValueError("authority_model.history_len must be in [1, 512]")
+    if not 1 <= authority_model.embed_dim <= 2048:
+        raise ValueError("authority_model.embed_dim must be in [1, 2048]")
+    if not 1 <= authority_model.heads <= authority_model.embed_dim:
+        raise ValueError("authority_model.heads must be in [1, embed_dim]")
+    if authority_model.embed_dim % authority_model.heads:
+        raise ValueError("authority_model.embed_dim must be divisible by heads")
+    if not 1 <= authority_model.layers <= 64:
+        raise ValueError("authority_model.layers must be in [1, 64]")
+    if not 0.0 <= authority_model.dropout < 1.0:
+        raise ValueError("authority_model.dropout must be in [0, 1)")
+    if authority_model.alpha_gain < 0.0:
+        raise ValueError("authority_model.alpha_gain must be non-negative")
+    for name, value in (
+        ("alpha_smoothing", authority_model.alpha_smoothing),
+        ("alpha_rate_limit", authority_model.alpha_rate_limit),
+        ("alpha_deadband", authority_model.alpha_deadband),
+    ):
+        if not 0.0 <= value <= 1.0:
+            raise ValueError(f"authority_model.{name} must be in [0, 1]")
+
     actuator_data = _section(data, "actuator")
     actuator = ActuatorConfig(
         command_min=_float_value(_required(actuator_data, "command_min"), "actuator.command_min"),
@@ -400,6 +479,7 @@ def load_v3_config(path: str | Path) -> V3ExperimentConfig:
         protocol=protocol,
         environment=environment,
         controller=controller,
+        authority_model=authority_model,
         actuator=actuator,
         mpc=mpc,
         oracle=oracle,
