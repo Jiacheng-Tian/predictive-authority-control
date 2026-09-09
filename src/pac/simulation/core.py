@@ -106,18 +106,20 @@ class AUVSimulator:
         return self.thruster_layout.forces_to_wrench(forces), forces
 
     def reset(self, seed: int | None = None, *, episode_spec=None) -> None:
-        self.dynamics.reset()
-        self.actuator.reset()
-        if episode_spec is None:
-            random = np.random.default_rng(seed)
-            if self.initial_position_std > 0.0:
-                self.dynamics.eta[:3] = random.normal(0.0, self.initial_position_std, size=3)
-            if self.initial_velocity_std > 0.0:
-                self.dynamics.nu[:3] = random.normal(0.0, self.initial_velocity_std, size=3)
-        else:
+        validated_eta = None
+        validated_nu = None
+        if episode_spec is not None:
             try:
-                scenario_id = int(episode_spec.scenario_id)
-                steps = int(episode_spec.steps)
+                scenario_value = episode_spec.scenario_id
+                steps_value = episode_spec.steps
+                if isinstance(scenario_value, (bool, np.bool_)) or not isinstance(
+                        scenario_value, (int, np.integer)):
+                    raise ValueError("episode_spec scenario_id must be an integer")
+                if isinstance(steps_value, (bool, np.bool_)) or not isinstance(
+                        steps_value, (int, np.integer)):
+                    raise ValueError("episode_spec steps must be an integer")
+                scenario_id = int(scenario_value)
+                steps = int(steps_value)
                 spec_dt = float(episode_spec.dt)
                 initial_eta = np.asarray(episode_spec.initial_eta, dtype=float)
                 initial_nu = np.asarray(episode_spec.initial_nu, dtype=float)
@@ -138,8 +140,32 @@ class AUVSimulator:
                 raise ValueError("episode_spec initial states must have shape (6,)")
             if not np.all(np.isfinite(initial_eta)) or not np.all(np.isfinite(initial_nu)):
                 raise ValueError("episode_spec initial states must be finite")
-            self.dynamics.eta = np.array(initial_eta, dtype=float, copy=True)
-            self.dynamics.nu = np.array(initial_nu, dtype=float, copy=True)
+            current_noise = getattr(episode_spec, "current_estimation_noise", None)
+            if current_noise is not None:
+                try:
+                    current_noise = np.asarray(current_noise, dtype=float)
+                except (TypeError, ValueError, OverflowError) as exc:
+                    raise ValueError(
+                        "episode_spec current_estimation_noise must be finite"
+                    ) from exc
+                if current_noise.shape != (steps, 3) or not np.all(np.isfinite(current_noise)):
+                    raise ValueError(
+                        "episode_spec current_estimation_noise must have shape (steps, 3) and be finite"
+                    )
+            validated_eta = np.array(initial_eta, dtype=float, copy=True)
+            validated_nu = np.array(initial_nu, dtype=float, copy=True)
+
+        self.dynamics.reset()
+        self.actuator.reset()
+        if episode_spec is None:
+            random = np.random.default_rng(seed)
+            if self.initial_position_std > 0.0:
+                self.dynamics.eta[:3] = random.normal(0.0, self.initial_position_std, size=3)
+            if self.initial_velocity_std > 0.0:
+                self.dynamics.nu[:3] = random.normal(0.0, self.initial_velocity_std, size=3)
+        else:
+            self.dynamics.eta = validated_eta
+            self.dynamics.nu = validated_nu
         self._episode_spec = episode_spec
         self.current_step = 0
         self.prev_action = np.zeros(6)

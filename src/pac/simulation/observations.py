@@ -42,6 +42,7 @@ class CausalCurrentEstimator:
         self._delayed: list[np.ndarray] = []
         self._noise: list[np.ndarray] = []
         self._estimate: list[np.ndarray] = []
+        self._expected_step = 0
 
     def reset(self, initial_current) -> None:
         initial = _readonly(initial_current, (3,))
@@ -53,17 +54,20 @@ class CausalCurrentEstimator:
         self._delayed.clear()
         self._noise.clear()
         self._estimate.clear()
+        self._expected_step = 0
 
     def estimate(self, true_current, step: int) -> np.ndarray:
         if self._buffer is None:
             raise RuntimeError("estimator must be reset before estimate")
-        if isinstance(step, (bool, np.bool_)):
+        if isinstance(step, (bool, np.bool_)) or not isinstance(
+                step, (int, np.integer)):
             raise ValueError("step must be a non-negative integer")
-        try:
-            index = int(step)
-        except (TypeError, ValueError, OverflowError) as exc:
-            raise ValueError("step must be a non-negative integer") from exc
-        if index != step or index < 0 or index >= len(self.noise):
+        index = int(step)
+        if index != self._expected_step:
+            raise ValueError(
+                f"step must be the next contiguous step ({self._expected_step})"
+            )
+        if index < 0 or index >= len(self.noise):
             raise ValueError("step must index the pre-generated noise")
         current = _readonly(true_current, (3,))
         if self.delay_steps:
@@ -77,7 +81,12 @@ class CausalCurrentEstimator:
         self._delayed.append(_readonly(delayed, (3,)))
         self._noise.append(_readonly(noise, (3,)))
         self._estimate.append(estimate)
+        self._expected_step += 1
         return estimate.copy()
+
+    @property
+    def expected_step(self) -> int:
+        return self._expected_step
 
     @property
     def telemetry(self) -> dict[str, np.ndarray]:

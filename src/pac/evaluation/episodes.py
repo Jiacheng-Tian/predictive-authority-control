@@ -265,7 +265,7 @@ def run_fixed_controller_episode(
         sample_times.append(sample_time)
         rolls.append(float(row_eta[3]))
         pitches.append(float(row_eta[4]))
-        headings.append(row_heading)
+        headings.append(float(row_eta[5]) if aligned else float(pre_eta[5]))
         desired_rolls.append(float(row_target[3]))
         desired_pitches.append(float(row_target[4]))
         desired_headings.append(row_desired_heading)

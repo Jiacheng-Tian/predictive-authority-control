@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from types import SimpleNamespace
 
 import numpy as np
 
@@ -84,6 +85,77 @@ class EpisodePairingTest(unittest.TestCase):
         simulator.reset(episode_spec=spec)
         np.testing.assert_array_equal(simulator.dynamics.eta, spec.initial_eta)
         np.testing.assert_array_equal(simulator.dynamics.nu, spec.initial_nu)
+
+    def test_invalid_spec_reset_is_atomic(self):
+        from pac.evaluation.episode_spec import build_episode_spec
+        from pac.simulation.core import AUVSimulator
+
+        simulator = AUVSimulator(scenario=1, max_steps=3, dt=0.01)
+        simulator.reset(seed=7)
+        simulator.step(np.full(6, 0.3))
+        before_eta = simulator.dynamics.eta.copy()
+        before_nu = simulator.dynamics.nu.copy()
+        before_step = simulator.current_step
+        before_prev_action = simulator.prev_action.copy()
+        before_true_current = simulator._true_current_velocity.copy()
+        before_previous_current = simulator._previous_current_velocity.copy()
+        before_actuator_previous = simulator.actuator._previous_applied.copy()
+        before_episode_spec = simulator.episode_spec
+        before_telemetry = {
+            key: value.copy() for key, value in simulator.actuator_telemetry.items()
+        }
+        valid = build_episode_spec(1, 41000, steps=3, dt=0.01)
+        def invalid(**overrides):
+            values = {
+                "scenario_id": valid.scenario_id,
+                "episode_seed": valid.episode_seed,
+                "steps": valid.steps,
+                "dt": valid.dt,
+                "initial_eta": valid.initial_eta,
+                "initial_nu": valid.initial_nu,
+                "current_estimation_noise": valid.current_estimation_noise,
+            }
+            values.update(overrides)
+            return SimpleNamespace(**values)
+        invalid_specs = (
+            invalid(scenario_id=2),
+            invalid(steps=4),
+            invalid(dt=0.02),
+            invalid(initial_eta=np.zeros(5)),
+            invalid(initial_nu=np.full(6, np.inf)),
+            invalid(current_estimation_noise=np.zeros((2, 3))),
+        )
+        for invalid in invalid_specs:
+            with self.assertRaises(ValueError):
+                simulator.reset(episode_spec=invalid)
+            np.testing.assert_array_equal(simulator.dynamics.eta, before_eta)
+            np.testing.assert_array_equal(simulator.dynamics.nu, before_nu)
+            self.assertEqual(simulator.current_step, before_step)
+            np.testing.assert_array_equal(simulator.prev_action, before_prev_action)
+            np.testing.assert_array_equal(
+                simulator._true_current_velocity, before_true_current
+            )
+            np.testing.assert_array_equal(
+                simulator._previous_current_velocity, before_previous_current
+            )
+            np.testing.assert_array_equal(
+                simulator.actuator._previous_applied, before_actuator_previous
+            )
+            self.assertIs(simulator.episode_spec, before_episode_spec)
+            for key, value in before_telemetry.items():
+                np.testing.assert_array_equal(simulator.actuator_telemetry[key], value)
+
+    def test_paired_grid_natural_keys_are_unique(self):
+        from pac.evaluation.protocol import build_paired_evaluation_grid
+
+        rows = build_paired_evaluation_grid(
+            model_seeds=[0, 2], episode_seeds=[1, 3], scenarios=[1, 2, 3]
+        )
+        keys = [
+            (row["method"], row["scenario_id"], row["episode_uid"], row["model_seed"])
+            for row in rows
+        ]
+        self.assertEqual(len(keys), len(set(keys)))
 
     def test_gym_reset_options_forward_episode_spec(self):
         from pac.evaluation.episode_spec import build_episode_spec
