@@ -76,7 +76,9 @@ def compute_error_window_metrics(
             "disturbance_recovery_time_s": float("nan"),
         }
     errors = df["error"].to_numpy(dtype=float)
-    if "step" in df:
+    if "time" in df:
+        times = df["time"].to_numpy(dtype=float)
+    elif "step" in df:
         times = df["step"].to_numpy(dtype=float) * float(dt)
     else:
         times = np.arange(errors.size, dtype=float) * float(dt)
@@ -108,6 +110,23 @@ def compute_timeseries_engineering_metrics(
         saturation_threshold: float = 0.99) -> dict[str, float]:
     """Compute all engineering metrics from a validation timeseries."""
     metrics = compute_action_metrics(df, saturation_threshold=saturation_threshold)
+    if "actuator_rate_limited_fraction" in df.columns:
+        values = pd.to_numeric(
+            df["actuator_rate_limited_fraction"], errors="coerce"
+        ).dropna().to_numpy(dtype=float)
+        metrics["actuator_rate_limited_fraction_mean"] = (
+            float(np.mean(values)) if values.size else 0.0
+        )
+        metrics["actuator_rate_limit_episode_mean"] = metrics[
+            "actuator_rate_limited_fraction_mean"
+        ]
+    if "actuator_amplitude_clipped_fraction" in df.columns:
+        values = pd.to_numeric(
+            df["actuator_amplitude_clipped_fraction"], errors="coerce"
+        ).dropna().to_numpy(dtype=float)
+        metrics["actuator_amplitude_clipped_fraction_mean"] = (
+            float(np.mean(values)) if values.size else 0.0
+        )
     if "authority_alpha" in df.columns:
         alpha = (
             pd.to_numeric(df["authority_alpha"], errors="coerce")

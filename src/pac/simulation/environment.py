@@ -65,6 +65,14 @@ class AUVTrackingEnv(gym.Env):
     def privileged_state(self):
         return self.simulator.privileged_state
 
+    @property
+    def actuator_telemetry(self):
+        return self.simulator.actuator_telemetry
+
+    @property
+    def episode_spec(self):
+        return self.simulator.episode_spec
+
     def _get_target(self, t):
         return self.simulator._get_target(t)
 
@@ -110,8 +118,15 @@ class AUVTrackingEnv(gym.Env):
 
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed)
-        del options
-        self.simulator.reset(seed=seed)
+        episode_spec = None
+        if options is not None:
+            if not isinstance(options, dict):
+                raise TypeError("reset options must be a mapping")
+            episode_spec = options.get("episode_spec")
+        self.simulator.reset(
+            seed=None if episode_spec is not None else seed,
+            episode_spec=episode_spec,
+        )
         return self._observation(), {}
 
     def step(self, action):

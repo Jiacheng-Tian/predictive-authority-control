@@ -5,6 +5,8 @@ import numpy as np
 import pandas as pd
 
 from pac.simulation.core import AUVSimulator
+from pac.simulation.observations import CausalCurrentEstimator
+from pac.evaluation.seeds import episode_uid as make_episode_uid
 from pac.controllers.presets import (
     build_real10kg_mpc_event,
     build_real10kg_mpc_ltv_v3,
@@ -72,8 +74,18 @@ def make_timeseries(
         desired_pitches=None,
         zs=None,
         target_zs=None,
-        z_errors=None) -> dict:
+        z_errors=None,
+        times=None,
+        requested_actions=None,
+        applied_actions=None,
+        true_currents=None,
+        estimated_currents=None,
+        amplitude_clipped_fractions=None,
+        rate_limited_fractions=None) -> dict:
     out = {"step": steps, "error": errors, "energy": energies, "heading": headings, "desired_heading": desired_headings, "x": xs, "y": ys}
+    if times is not None:
+        out["time"] = times
+        out["sample_time"] = times
     out["yaw"] = headings
     out["desired_yaw"] = desired_headings
     if rolls is not None:
@@ -90,10 +102,28 @@ def make_timeseries(
         out["target_z"] = target_zs
     if z_errors is not None:
         out["z_error"] = z_errors
-    if actions:
-        action_array = np.asarray(actions, dtype=float)
+    action_values = actions if applied_actions is None else applied_actions
+    if len(action_values):
+        action_array = np.asarray(action_values, dtype=float)
         for idx in range(action_array.shape[1]):
             out[f"action_{idx}"] = action_array[:, idx]
+            out[f"applied_action_{idx}"] = action_array[:, idx]
+    if requested_actions is not None and len(requested_actions):
+        requested_array = np.asarray(requested_actions, dtype=float)
+        for idx in range(requested_array.shape[1]):
+            out[f"requested_action_{idx}"] = requested_array[:, idx]
+    if true_currents is not None and len(true_currents):
+        current_array = np.asarray(true_currents, dtype=float)
+        for idx in range(current_array.shape[1]):
+            out[f"true_current_{idx}"] = current_array[:, idx]
+    if estimated_currents is not None and len(estimated_currents):
+        current_array = np.asarray(estimated_currents, dtype=float)
+        for idx in range(current_array.shape[1]):
+            out[f"estimated_current_{idx}"] = current_array[:, idx]
+    if amplitude_clipped_fractions is not None:
+        out["actuator_amplitude_clipped_fraction"] = amplitude_clipped_fractions
+    if rate_limited_fractions is not None:
+        out["actuator_rate_limited_fraction"] = rate_limited_fractions
     return out
 
 
@@ -135,7 +165,12 @@ def run_fixed_controller_episode(
         vertical_current: float = 0.0,
         vehicle_profile: str = "real_10kg_v1",
         thruster_layout: str = "real_10kg_x",
-        save_ts: bool = False) -> dict:
+        save_ts: bool = False,
+        episode_spec=None,
+        dt: float = 0.01,
+        actuator_max_delta_per_step: float | None = None,
+        aligned_metrics: bool = False) -> dict:
+    aligned = bool(aligned_metrics or episode_spec is not None)
     env = AUVSimulator(
         scenario=int(scenario),
         max_steps=int(steps),
@@ -148,14 +183,31 @@ def run_fixed_controller_episode(
         vertical_current=float(vertical_current),
         vehicle_profile=str(vehicle_profile),
         thruster_layout=str(thruster_layout),
+        dt=float(dt),
+        actuator_max_delta_per_step=actuator_max_delta_per_step,
     )
     canonical_name, controller = build_controller(base_controller)
-    env.reset(seed=int(seed))
+    env.reset(
+        seed=None if episode_spec is not None else int(seed),
+        episode_spec=episode_spec,
+    )
+    estimator = None
+    if episode_spec is not None:
+        estimator = CausalCurrentEstimator(
+            episode_spec.current_delay_steps,
+            episode_spec.current_estimation_noise,
+        )
+        estimator.reset(env.privileged_state[:3])
     if hasattr(controller, "reset"):
         controller.reset()
     controller.set_trajectory3d(True)
     errors, energies, actions = [], [], []
+    requested_actions = []
+    true_currents, estimated_currents = [], []
+    sample_times = []
+    amplitude_clipped_fractions, rate_limited_fractions = [], []
     headings, desired_headings, xs, ys, step_rows = [], [], [], [], []
+    target_states = []
     rolls, pitches, desired_rolls, desired_pitches = [], [], [], []
     zs, target_zs, z_errors, thruster_forces = [], [], [], []
     done = False
@@ -163,23 +215,73 @@ def run_fixed_controller_episode(
         dyn = env.dynamics
         t = env.current_step * dyn.dt
         target = env._get_target(t)
-        action = compute_controller_action(controller, canonical_name, target, dyn.eta, dyn.nu, t, dyn.dt, env.privileged_state[:3])
-        step_rows.append(int(env.current_step))
-        rolls.append(float(dyn.eta[3]))
-        pitches.append(float(dyn.eta[4]))
-        headings.append(float(dyn.eta[5]))
-        desired_rolls.append(float(target[3]))
-        desired_pitches.append(float(target[4]))
-        desired_headings.append(float(desired_heading(t)))
-        xs.append(float(dyn.eta[0]))
-        ys.append(float(dyn.eta[1]))
-        zs.append(float(dyn.eta[2]))
-        target_zs.append(float(target[2]))
+        pre_eta = np.asarray(dyn.eta, dtype=float).copy()
+        if episode_spec is not None:
+            true_current = np.asarray(
+                env._current_for_dynamics(env._generate_current(t)),
+                dtype=float,
+            ).copy()
+        else:
+            true_current = np.asarray(env.privileged_state[:3], dtype=float).copy()
+        if estimator is not None:
+            estimated_current = estimator.estimate(true_current, env.current_step)
+        else:
+            estimated_current = true_current.copy()
+        action = np.asarray(
+            compute_controller_action(
+                controller,
+                canonical_name,
+                target,
+                dyn.eta,
+                dyn.nu,
+                t,
+                dyn.dt,
+                estimated_current,
+            ),
+            dtype=float,
+        ).reshape(6)
         done, info = env.step(action)
-        errors.append(float(info["dist_error"]))
+        sample_time = float(info.get("sample_time", t + dyn.dt))
+        if aligned:
+            row_target = env._get_target(sample_time)
+            row_eta = np.asarray(dyn.eta, dtype=float).copy()
+            row_error = row_target - row_eta
+            for index in (3, 4, 5):
+                row_error[index] = wrap_angle(row_error[index])
+            row_dist_error = float(np.linalg.norm(row_error[:3]))
+            row_z_error = float(row_error[2])
+            row_heading = float(row_eta[5])
+            row_desired_heading = float(desired_heading(sample_time))
+        else:
+            row_target = target
+            row_eta = pre_eta
+            row_dist_error = float(info["dist_error"])
+            row_z_error = float(info.get("z_error", target[2] - dyn.eta[2]))
+            row_heading = float(dyn.eta[5])
+            row_desired_heading = float(desired_heading(t))
+        step_rows.append(int(env.current_step - 1))
+        sample_times.append(sample_time if aligned else t)
+        rolls.append(float(row_eta[3]))
+        pitches.append(float(row_eta[4]))
+        headings.append(row_heading)
+        desired_rolls.append(float(row_target[3]))
+        desired_pitches.append(float(row_target[4]))
+        desired_headings.append(row_desired_heading)
+        xs.append(float(row_eta[0]))
+        ys.append(float(row_eta[1]))
+        zs.append(float(row_eta[2]))
+        target_zs.append(float(row_target[2]))
+        target_states.append(np.asarray(row_target, dtype=float).copy())
+        errors.append(row_dist_error)
         energies.append(float(info["energy"]))
-        z_errors.append(float(info.get("z_error", target[2] - dyn.eta[2])))
-        actions.append(np.asarray(action, dtype=float).copy())
+        z_errors.append(row_z_error)
+        applied_action = np.asarray(info["applied_action"], dtype=float).copy()
+        actions.append(applied_action)
+        requested_actions.append(np.asarray(info["requested_action"], dtype=float).copy())
+        true_currents.append(true_current.copy())
+        estimated_currents.append(np.asarray(estimated_current, dtype=float).copy())
+        amplitude_clipped_fractions.append(float(info.get("actuator_amplitude_clipped_fraction", 0.0)))
+        rate_limited_fractions.append(float(info.get("actuator_rate_limited_fraction", 0.0)))
         if "thruster_forces" in info:
             thruster_forces.append(np.asarray(info["thruster_forces"], dtype=float))
     metrics = compute_episode_metrics(errors, energies, actions, headings, desired_headings, env.dynamics.dt, z_errors=z_errors)
@@ -195,6 +297,17 @@ def run_fixed_controller_episode(
         "vehicle_profile": str(vehicle_profile),
         "action_mode": "thruster",
         "thruster_layout": str(thruster_layout),
+        "episode_uid": (
+            str(episode_spec.episode_uid)
+            if episode_spec is not None
+            else make_episode_uid(int(scenario), int(seed))
+        ),
+        "environment_seed": int(
+            episode_spec.episode_seed if episode_spec is not None else seed
+        ),
+        "aligned_metrics": aligned,
+        "actuator_rate_limited_fraction_mean": float(np.mean(rate_limited_fractions)) if rate_limited_fractions else 0.0,
+        "actuator_rate_limit_episode_mean": float(np.mean(rate_limited_fractions)) if rate_limited_fractions else 0.0,
     })
     ts = pd.DataFrame(make_timeseries(
         step_rows,
@@ -212,7 +325,18 @@ def run_fixed_controller_episode(
         zs=zs,
         target_zs=target_zs,
         z_errors=z_errors,
+        times=sample_times,
+        requested_actions=requested_actions,
+        applied_actions=actions,
+        true_currents=true_currents,
+        estimated_currents=estimated_currents,
+        amplitude_clipped_fractions=amplitude_clipped_fractions,
+        rate_limited_fractions=rate_limited_fractions,
     ))
+    target_array = np.asarray(target_states, dtype=float)
+    for index, name in enumerate(("target_x", "target_y", "target_z", "target_roll", "target_pitch", "target_yaw")):
+        ts[name] = target_array[:, index]
+    ts["target_z"] = target_array[:, 2]
     if thruster_forces:
         force_array = np.asarray(thruster_forces, dtype=float)
         for idx in range(force_array.shape[1]):

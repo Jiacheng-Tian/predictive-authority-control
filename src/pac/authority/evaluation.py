@@ -12,7 +12,9 @@ from pac.authority.features import build_alpha_feature
 from pac.authority.model import build_temporal_feature_window
 from pac.evaluation.episodes import build_controller, compute_controller_action, compute_episode_metrics, desired_heading
 from pac.evaluation.metrics import compute_timeseries_engineering_metrics
+from pac.evaluation.seeds import episode_uid as make_episode_uid
 from pac.simulation.core import AUVSimulator
+from pac.simulation.observations import CausalCurrentEstimator
 
 
 AUTHORITY_WINDOWS = (
@@ -102,10 +104,15 @@ def run_predictive_alpha_episode(
         alpha_deadband: float = 0.0,
         policy_architecture: str = "transformer",
         history_len: int = 16,
-        save_ts: bool = False) -> dict:
+        save_ts: bool = False,
+        episode_spec=None,
+        dt: float = 0.01,
+        actuator_max_delta_per_step: float | None = None,
+        aligned_metrics: bool = False) -> dict:
     """Evaluate PAC while preserving the archived formal-v2 metric timing."""
     if policy_architecture != "transformer":
         raise ValueError("formal PAC evaluation requires transformer architecture")
+    aligned = bool(aligned_metrics or episode_spec is not None)
     environment = AUVSimulator(
         scenario=int(scenario),
         max_steps=int(steps),
@@ -118,18 +125,34 @@ def run_predictive_alpha_episode(
         vertical_current=float(vertical_current),
         vehicle_profile=str(vehicle_profile),
         thruster_layout=str(thruster_layout),
+        dt=float(dt),
+        actuator_max_delta_per_step=actuator_max_delta_per_step,
     )
     primary_name, primary = build_controller(primary_controller)
     authority_name, authority = build_controller(authority_controller)
     for controller in (primary, authority):
         controller.reset()
         controller.set_trajectory3d(True)
-    environment.reset(seed=int(seed))
+    environment.reset(
+        seed=None if episode_spec is not None else int(seed),
+        episode_spec=episode_spec,
+    )
+    estimator = None
+    if episode_spec is not None:
+        estimator = CausalCurrentEstimator(
+            episode_spec.current_delay_steps,
+            episode_spec.current_estimation_noise,
+        )
+        estimator.reset(environment.privileged_state[:3])
     model.eval()
 
     episode_end = float(steps) * environment.dynamics.dt
     errors, energies, actions, thruster_forces = [], [], [], []
+    requested_actions = []
+    true_currents, estimated_currents = [], []
+    amplitude_clipped_fractions, rate_limited_fractions = [], []
     headings, desired_headings, steps_out, times = [], [], [], []
+    target_states = []
     rolls, pitches, desired_rolls, desired_pitches = [], [], [], []
     xs, ys, zs, target_zs, z_errors = [], [], [], [], []
     active_values, alpha_values, raw_values = [], [], []
@@ -141,7 +164,20 @@ def run_predictive_alpha_episode(
         dynamics = environment.dynamics
         t = environment.current_step * dynamics.dt
         target = environment._get_target(t)
-        current = environment.privileged_state[:3]
+        pre_eta = np.asarray(dynamics.eta, dtype=float).copy()
+        if episode_spec is not None:
+            true_current = np.asarray(
+                environment._current_for_dynamics(
+                    environment._generate_current(t)
+                ),
+                dtype=float,
+            ).copy()
+        else:
+            true_current = np.asarray(environment.privileged_state[:3], dtype=float).copy()
+        if estimator is not None:
+            current = estimator.estimate(true_current, environment.current_step)
+        else:
+            current = true_current.copy()
         primary_action = compute_controller_action(
             primary, primary_name, target, dynamics.eta, dynamics.nu, t, dynamics.dt, current
         )
@@ -188,29 +224,53 @@ def run_predictive_alpha_episode(
             alpha,
         )
 
-        steps_out.append(int(environment.current_step))
-        times.append(float(t))
-        rolls.append(float(dynamics.eta[3]))
-        pitches.append(float(dynamics.eta[4]))
-        headings.append(float(dynamics.eta[5]))
-        desired_rolls.append(float(target[3]))
-        desired_pitches.append(float(target[4]))
-        desired_headings.append(float(desired_heading(t)))
-        xs.append(float(dynamics.eta[0]))
-        ys.append(float(dynamics.eta[1]))
-        zs.append(float(dynamics.eta[2]))
-        target_zs.append(float(target[2]))
         active_values.append(float(blend_info["authority_active"]))
         alpha_values.append(float(blend_info["authority_alpha"]))
         raw_values.append(float(alpha_raw))
         forced_primary_values.append(bool(authority_forced_primary))
 
-        # Formal v2 records the pre-step state alongside the post-step error.
+        pre_step = int(environment.current_step)
         done, step_info = environment.step(action)
-        errors.append(float(step_info["dist_error"]))
+        sample_time = float(step_info.get("sample_time", t + dynamics.dt))
+        if aligned:
+            row_target = environment._get_target(sample_time)
+            row_eta = np.asarray(dynamics.eta, dtype=float).copy()
+            row_error = row_target - row_eta
+            for index in (3, 4, 5):
+                row_error[index] = float((row_error[index] + np.pi) % (2.0 * np.pi) - np.pi)
+            row_dist_error = float(np.linalg.norm(row_error[:3]))
+            row_z_error = float(row_error[2])
+            row_desired_heading = float(desired_heading(sample_time))
+            row_time = sample_time
+        else:
+            row_target = target
+            row_eta = pre_eta
+            row_dist_error = float(step_info["dist_error"])
+            row_z_error = float(step_info["z_error"])
+            row_desired_heading = float(desired_heading(t))
+            row_time = t
+        steps_out.append(pre_step)
+        times.append(float(row_time))
+        rolls.append(float(row_eta[3]))
+        pitches.append(float(row_eta[4]))
+        headings.append(float(row_eta[5]))
+        desired_rolls.append(float(row_target[3]))
+        desired_pitches.append(float(row_target[4]))
+        desired_headings.append(row_desired_heading)
+        xs.append(float(row_eta[0]))
+        ys.append(float(row_eta[1]))
+        zs.append(float(row_eta[2]))
+        target_zs.append(float(row_target[2]))
+        target_states.append(np.asarray(row_target, dtype=float).copy())
+        errors.append(row_dist_error)
         energies.append(float(step_info["energy"]))
-        z_errors.append(float(step_info["z_error"]))
-        actions.append(np.asarray(action, dtype=float).copy())
+        z_errors.append(row_z_error)
+        actions.append(np.asarray(step_info["applied_action"], dtype=float).copy())
+        requested_actions.append(np.asarray(step_info["requested_action"], dtype=float).copy())
+        true_currents.append(true_current.copy())
+        estimated_currents.append(np.asarray(current, dtype=float).copy())
+        amplitude_clipped_fractions.append(float(step_info.get("actuator_amplitude_clipped_fraction", 0.0)))
+        rate_limited_fractions.append(float(step_info.get("actuator_rate_limited_fraction", 0.0)))
         if "thruster_forces" in step_info:
             thruster_forces.append(np.asarray(step_info["thruster_forces"], dtype=float).copy())
         previous_alpha = float(alpha)
@@ -249,6 +309,17 @@ def run_predictive_alpha_episode(
         "vehicle_profile": str(vehicle_profile),
         "action_mode": "thruster",
         "thruster_layout": str(thruster_layout),
+        "episode_uid": (
+            str(episode_spec.episode_uid)
+            if episode_spec is not None
+            else make_episode_uid(int(scenario), int(seed))
+        ),
+        "environment_seed": int(
+            episode_spec.episode_seed if episode_spec is not None else seed
+        ),
+        "aligned_metrics": aligned,
+        "actuator_rate_limited_fraction_mean": float(np.mean(rate_limited_fractions)) if rate_limited_fractions else 0.0,
+        "actuator_rate_limit_episode_mean": float(np.mean(rate_limited_fractions)) if rate_limited_fractions else 0.0,
     })
     if alpha_bias_schedule:
         metrics["alpha_bias_schedule_json"] = json.dumps(alpha_bias_schedule, sort_keys=True)
@@ -257,6 +328,7 @@ def run_predictive_alpha_episode(
     timeseries = pd.DataFrame({
         "step": steps_out,
         "time": times,
+        "sample_time": times,
         "error": errors,
         "energy": energies,
         "roll": rolls,
@@ -278,9 +350,23 @@ def run_predictive_alpha_episode(
         "alpha_raw": raw_values,
         "alpha_uncertainty": np.zeros(len(raw_values)),
     })
+    target_array = np.asarray(target_states, dtype=float)
+    for index, name in enumerate(("target_x", "target_y", "target_z", "target_roll", "target_pitch", "target_yaw")):
+        timeseries[name] = target_array[:, index]
     action_array = np.asarray(actions, dtype=float)
     for index in range(action_array.shape[1]):
         timeseries[f"action_{index}"] = action_array[:, index]
+        timeseries[f"applied_action_{index}"] = action_array[:, index]
+    requested_array = np.asarray(requested_actions, dtype=float)
+    for index in range(requested_array.shape[1]):
+        timeseries[f"requested_action_{index}"] = requested_array[:, index]
+    true_current_array = np.asarray(true_currents, dtype=float)
+    estimated_current_array = np.asarray(estimated_currents, dtype=float)
+    for index in range(3):
+        timeseries[f"true_current_{index}"] = true_current_array[:, index]
+        timeseries[f"estimated_current_{index}"] = estimated_current_array[:, index]
+    timeseries["actuator_amplitude_clipped_fraction"] = amplitude_clipped_fractions
+    timeseries["actuator_rate_limited_fraction"] = rate_limited_fractions
     if thruster_forces:
         force_array = np.asarray(thruster_forces, dtype=float)
         for index in range(force_array.shape[1]):

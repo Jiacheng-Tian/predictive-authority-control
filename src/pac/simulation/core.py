@@ -59,6 +59,8 @@ class AUVSimulator:
         self.prev_action = np.zeros(6)
         self._true_current_velocity = np.zeros(3)
         self._previous_current_velocity = np.zeros(2)
+        self._episode_spec = None
+        self._actuator_history: list[dict[str, object]] = []
 
     @staticmethod
     def _get_target(t):
@@ -103,16 +105,45 @@ class AUVSimulator:
         forces = self.thruster_layout.normalized_action_to_forces(action)
         return self.thruster_layout.forces_to_wrench(forces), forces
 
-    def reset(self, seed: int | None = None) -> None:
+    def reset(self, seed: int | None = None, *, episode_spec=None) -> None:
         self.dynamics.reset()
         self.actuator.reset()
-        random = np.random.default_rng(seed)
-        if self.initial_position_std > 0.0:
-            self.dynamics.eta[:3] = random.normal(0.0, self.initial_position_std, size=3)
-        if self.initial_velocity_std > 0.0:
-            self.dynamics.nu[:3] = random.normal(0.0, self.initial_velocity_std, size=3)
+        if episode_spec is None:
+            random = np.random.default_rng(seed)
+            if self.initial_position_std > 0.0:
+                self.dynamics.eta[:3] = random.normal(0.0, self.initial_position_std, size=3)
+            if self.initial_velocity_std > 0.0:
+                self.dynamics.nu[:3] = random.normal(0.0, self.initial_velocity_std, size=3)
+        else:
+            try:
+                scenario_id = int(episode_spec.scenario_id)
+                steps = int(episode_spec.steps)
+                spec_dt = float(episode_spec.dt)
+                initial_eta = np.asarray(episode_spec.initial_eta, dtype=float)
+                initial_nu = np.asarray(episode_spec.initial_nu, dtype=float)
+            except (AttributeError, TypeError, ValueError, OverflowError) as exc:
+                raise ValueError(
+                    "episode_spec must provide scenario_id, steps, dt, initial_eta, and initial_nu"
+                ) from exc
+            if (
+                    scenario_id != episode_spec.scenario_id
+                    or steps != episode_spec.steps
+                    or scenario_id != self.scenario
+                    or steps != self.max_steps
+            ):
+                raise ValueError("episode_spec scenario_id and steps must match simulator")
+            if not np.isfinite(spec_dt) or not np.isclose(spec_dt, self.dynamics.dt):
+                raise ValueError("episode_spec dt must match simulator")
+            if initial_eta.shape != (6,) or initial_nu.shape != (6,):
+                raise ValueError("episode_spec initial states must have shape (6,)")
+            if not np.all(np.isfinite(initial_eta)) or not np.all(np.isfinite(initial_nu)):
+                raise ValueError("episode_spec initial states must be finite")
+            self.dynamics.eta = np.array(initial_eta, dtype=float, copy=True)
+            self.dynamics.nu = np.array(initial_nu, dtype=float, copy=True)
+        self._episode_spec = episode_spec
         self.current_step = 0
         self.prev_action = np.zeros(6)
+        self._actuator_history = []
         horizontal = self._generate_current(0.0)
         self._true_current_velocity = self._current_for_dynamics(horizontal)
         self._previous_current_velocity = horizontal.copy()
@@ -139,7 +170,7 @@ class AUVSimulator:
         energy = float(np.sum(applied_action ** 2))
         self.prev_action = applied_action.copy()
         done = self.current_step >= self.max_steps or position_error > 20.0
-        return done, {
+        info = {
             "dist_error": position_error,
             "xy_dist_error": float(np.linalg.norm(error[:2])),
             "z_error": float(error[2]),
@@ -154,7 +185,23 @@ class AUVSimulator:
             "privileged_state": np.array([current[0], current[1], current[2], 0.0, 0.0, 0.0]),
             "applied_wrench": wrench.copy(),
             "thruster_forces": thruster_forces.copy(),
+            "true_current": current.copy(),
+            "sample_time": float(self.current_step * self.dynamics.dt),
         }
+        self._actuator_history.append({
+            key: value.copy() if isinstance(value, np.ndarray) else value
+            for key, value in info.items()
+            if key in {
+                "requested_action",
+                "amplitude_clipped_action",
+                "applied_action",
+                "actuator_amplitude_clipped_fraction",
+                "actuator_rate_limited_fraction",
+                "true_current",
+                "sample_time",
+            }
+        })
+        return done, info
 
     @property
     def privileged_state(self):
@@ -164,3 +211,40 @@ class AUVSimulator:
     @property
     def current_delta(self) -> np.ndarray:
         return self._true_current_velocity[:2] - self._previous_current_velocity
+
+    @property
+    def episode_spec(self):
+        return self._episode_spec
+
+    @property
+    def actuator_telemetry(self) -> dict[str, np.ndarray]:
+        """Return immutable per-step actuator and true-current telemetry."""
+        if not self._actuator_history:
+            empty = {
+                "requested_action": np.empty((0, 6), dtype=float),
+                "amplitude_clipped_action": np.empty((0, 6), dtype=float),
+                "applied_action": np.empty((0, 6), dtype=float),
+                "actuator_amplitude_clipped_fraction": np.empty(0, dtype=float),
+                "actuator_rate_limited_fraction": np.empty(0, dtype=float),
+                "true_current": np.empty((0, 3), dtype=float),
+                "sample_time": np.empty(0, dtype=float),
+            }
+            for values in empty.values():
+                values.setflags(write=False)
+            return empty
+        keys = (
+            "requested_action",
+            "amplitude_clipped_action",
+            "applied_action",
+            "actuator_amplitude_clipped_fraction",
+            "actuator_rate_limited_fraction",
+            "true_current",
+            "sample_time",
+        )
+        telemetry = {}
+        for key in keys:
+            values = np.asarray([row[key] for row in self._actuator_history], dtype=float)
+            values = np.array(values, dtype=float, copy=True)
+            values.setflags(write=False)
+            telemetry[key] = values
+        return telemetry
