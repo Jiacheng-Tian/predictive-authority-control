@@ -306,7 +306,10 @@ def collect_teacher_dataset_v3(config, profile: str = "formal"):
             environment.reset(episode_spec=spec)
             primary_name = config.controller.primary
             authority_name = config.controller.authority
-            primary, authority = build_v3_controller_pair(config)
+            primary, authority = build_v3_controller_pair(
+                config,
+                solver_time_limit_s=config.oracle.mpc_solver_time_limit_s,
+            )
             for controller in (primary, authority):
                 controller.reset()
                 controller.set_trajectory3d(True)

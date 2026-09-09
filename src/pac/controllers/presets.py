@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import numpy as np
+
 from pac.controllers.legacy_predictive import LegacyOneStepPredictiveController
 from pac.controllers.mpc import MPCController
 from pac.controllers.mpc_qp import MPCQPSettings
@@ -66,7 +68,7 @@ def build_real10kg_smc_steady(
     )
 
 
-def build_v3_controller_pair(config):
+def build_v3_controller_pair(config, *, solver_time_limit_s: float | None = None):
     """Build the v3 SMC/MPC pair directly from one experiment config."""
     if config.controller.primary != "real10kg_smc_steady":
         raise ValueError(f"unsupported v3 primary controller: {config.controller.primary}")
@@ -90,6 +92,14 @@ def build_v3_controller_pair(config):
         vehicle_profile=config.environment.vehicle_profile,
         dt=config.environment.dt,
     )
+    time_limit_s = (
+        config.mpc.time_limit_s
+        if solver_time_limit_s is None else float(solver_time_limit_s)
+    )
+    if not np.isfinite(time_limit_s) or time_limit_s < config.mpc.time_limit_s:
+        raise ValueError(
+            "solver_time_limit_s must be finite and >= config.mpc.time_limit_s"
+        )
     settings = MPCQPSettings(
         N=config.mpc.horizon,
         q_diag=config.mpc.q_diag,
@@ -102,7 +112,7 @@ def build_v3_controller_pair(config):
         eps_abs=config.mpc.eps_abs,
         eps_rel=config.mpc.eps_rel,
         max_iter=config.mpc.max_iter,
-        time_limit_s=config.mpc.time_limit_s,
+        time_limit_s=time_limit_s,
         accept_inaccurate_residual=config.mpc.accept_inaccurate_residual,
         max_consecutive_plan_reuse=config.mpc.max_consecutive_plan_reuse,
     )

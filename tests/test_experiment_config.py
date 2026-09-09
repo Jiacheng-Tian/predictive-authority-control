@@ -48,6 +48,7 @@ class V3ExperimentConfigTest(unittest.TestCase):
         self.assertEqual(config.mpc.time_limit_s, 0.0075)
         self.assertEqual(config.mpc.accept_inaccurate_residual, 1.0e-3)
         self.assertEqual(config.mpc.max_consecutive_plan_reuse, 3)
+        self.assertEqual(config.oracle.mpc_solver_time_limit_s, 0.05)
         self.assertEqual(config.training.oracle_train_seeds, tuple(range(11000, 11008)))
         self.assertEqual(config.training.oracle_val_seeds, (12000, 12001))
         self.assertEqual(config.training.model_seeds, tuple(range(31000, 31005)))
@@ -105,6 +106,17 @@ class V3ExperimentConfigTest(unittest.TestCase):
             path = Path(temp_dir) / "invalid.yaml"
             path.write_text(yaml.safe_dump(source), encoding="utf-8")
             with self.assertRaisesRegex(ValueError, r"q_diag.*12"):
+                load_v3_config(path)
+
+    def test_oracle_solver_time_limit_must_cover_online_budget(self):
+        from pac.experiment_config import load_v3_config
+
+        source = yaml.safe_load(V3_PATH.read_text(encoding="utf-8"))
+        source["oracle"]["mpc_solver_time_limit_s"] = 0.007
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "invalid.yaml"
+            path.write_text(yaml.safe_dump(source), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "mpc_solver_time_limit_s"):
                 load_v3_config(path)
 
     def test_every_seed_role_rejects_negative_seeds(self):

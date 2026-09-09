@@ -28,3 +28,16 @@ class V3ControllerPairTest(unittest.TestCase):
         self.assertEqual(authority.dynamics.dt, environment.dt)
         self.assertEqual(authority.thruster_layout.max_force, actuator.max_force_n)
         self.assertEqual(primary.thruster_layout.max_force, actuator.max_force_n)
+
+    def test_online_and_oracle_solver_budgets_are_explicit(self):
+        from pac.authority.training import build_v3_controller_pair
+        from pac.experiment_config import load_v3_config
+
+        config = load_v3_config(Path(__file__).resolve().parents[1] / "config" / "pac_v3.yaml")
+        _, online = build_v3_controller_pair(config)
+        _, oracle = build_v3_controller_pair(
+            config, solver_time_limit_s=config.oracle.mpc_solver_time_limit_s
+        )
+        self.assertEqual(online.settings.time_limit_s, 0.0075)
+        self.assertEqual(oracle.settings.time_limit_s, 0.05)
+        self.assertEqual(config.mpc.time_limit_s, 0.0075)

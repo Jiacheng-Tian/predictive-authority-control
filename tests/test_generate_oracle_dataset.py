@@ -53,6 +53,31 @@ class GenerateOracleDatasetTest(unittest.TestCase):
             self.assertEqual(metadata["split"].tolist()[:1], ["train"])
             self.assertTrue((output / "manifest.json").exists())
 
+    def test_short_can_generate_two_fresh_outputs(self):
+        import pandas as pd
+        from pac.authority.dataset import load_oracle_dataset
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            for index in (1, 2):
+                output = Path(temp_dir) / f"short-{index}"
+                completed = subprocess.run(
+                    [
+                        sys.executable,
+                        "scripts/generate_oracle_dataset.py",
+                        "--profile",
+                        "short",
+                        "--out-dir",
+                        str(output),
+                    ],
+                    cwd=ROOT,
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+                self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+                self.assertEqual(len(pd.read_csv(output / "metadata.csv")), 40)
+                self.assertEqual(load_oracle_dataset(output).sample_count, 40)
+
     def test_formal_contract_is_required_by_dry_and_short(self):
         import yaml
 

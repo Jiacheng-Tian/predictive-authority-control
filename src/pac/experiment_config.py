@@ -86,6 +86,7 @@ class MPCConfig:
 @dataclass(frozen=True)
 class OracleConfig:
     horizon: int
+    mpc_solver_time_limit_s: float
     alpha_grid: tuple[float, ...]
     xy_weight: float
     z_weight: float
@@ -406,6 +407,10 @@ def load_v3_config(path: str | Path) -> V3ExperimentConfig:
         raise ValueError("oracle.alpha_grid must be strictly increasing")
     oracle = OracleConfig(
         horizon=_int_value(_required(oracle_data, "horizon"), "oracle.horizon"),
+        mpc_solver_time_limit_s=_float_value(
+            _required(oracle_data, "mpc_solver_time_limit_s"),
+            "oracle.mpc_solver_time_limit_s",
+        ),
         alpha_grid=alpha_grid,
         xy_weight=_float_value(_required(oracle_data, "xy_weight"), "oracle.xy_weight"),
         z_weight=_float_value(_required(oracle_data, "z_weight"), "oracle.z_weight"),
@@ -425,6 +430,10 @@ def load_v3_config(path: str | Path) -> V3ExperimentConfig:
     )
     if not 1 <= oracle.horizon <= 200:
         raise ValueError("oracle.horizon must be in [1, 200]")
+    if oracle.mpc_solver_time_limit_s < mpc.time_limit_s:
+        raise ValueError(
+            "oracle.mpc_solver_time_limit_s must be >= mpc.time_limit_s"
+        )
     if any(
         weight < 0.0
         for weight in (
