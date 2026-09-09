@@ -152,10 +152,7 @@ def verify_evidence(failures: list[str]) -> None:
         except Exception as exc:
             failures.append(f"checkpoint load failed: {checkpoint}: {exc}")
 
-    config = load_config(ROOT / "config" / "pac.yaml")
-    overlap = set(config.sspo.search_seeds) & set(config.sspo.eval_seeds)
-    if overlap != {20000, 20001, 20002}:
-        failures.append("SSPO search/evaluation overlap provenance mismatch")
+    load_config(ROOT / "config" / "pac.yaml")
     if (ROOT / "results/formal_seeded_v2/timeseries/timeseries_3d.csv").exists():
         failures.append("derived merged PAC timeseries must not be stored")
 

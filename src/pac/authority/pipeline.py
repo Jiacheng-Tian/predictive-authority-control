@@ -266,9 +266,9 @@ def run_experiment(args) -> tuple[pd.DataFrame, pd.DataFrame]:
             "transformer_layers": args.transformer_layers,
             "model_dropout": args.model_dropout,
         },
-        "formal_scope_guardrail": (
-            "The learned model predicts only authority alpha between the SMC primary "
-            "and one-step predictive authority controller."
+        "method_scope": (
+            "PAC predicts authority alpha between the SMC primary and one-step "
+            "predictive authority controller."
         ),
     }
     (out_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")

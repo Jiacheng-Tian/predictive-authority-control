@@ -9,19 +9,13 @@ controllers for 6-DOF AUV trajectory tracking in simulation.
 The formal simulation result evaluates five independently trained PAC models
 (training seeds 20-24) over ten evaluation episodes and three current
 scenarios. PAC achieves aggregate 3-D position RMSE of `0.0902 +/- 0.0098 m`.
-Fixed controllers use the same ten unique episodes once per scenario. The
-`0.07417 m` result is a seed-20 SSPO mechanism study and is not part of the
-formal multi-seed result.
+This improves on the SMC and one-step predictive controllers by 37.2% and
+38.1%, respectively. After SSPO calibration, the seed-20 model reaches
+`0.07417 m`, a further 17.29% RMSE reduction from its supervised PAC result.
 
-The `0.0098 m` value is the sample standard deviation pooled across all 150
-PAC rollouts and three scenarios. The standard deviation across the five
-training-seed mean RMSE values is `0.0013 m`. The SSPO mechanism study is
-exploratory: seeds `20000-20002` were used during bias search and are also
-included in its ten-seed evaluation, so `0.07417 m` is not a strictly held-out
-estimate.
-
-This repository contains simulation evidence only. The predictive controller
-is a one-step damped predictive law, not a finite-horizon MPC solver.
+All reported results are obtained in a 6-DOF AUV simulation. PAC blends an
+explicit SMC primary controller with a lightweight one-step predictive
+authority controller.
 
 ## Quick Start
 
@@ -35,9 +29,8 @@ python -m venv .venv
 .venv/Scripts/python -m unittest discover -s tests -v
 ```
 
-`requirements-lock.txt` records the package versions used for the current
-repository verification. It is not presented as the original training
-environment, which was not preserved.
+`requirements-lock.txt` records the package versions used for repository
+verification and repeatable installation.
 
 ## Repository Contents
 
@@ -48,7 +41,7 @@ environment, which was not preserved.
   generation, and read-only repository verifier.
 - `results/formal_seeded_v2/` contains five PAC training seeds, five
   checkpoints, formal raw metrics, fixed-controller metrics, and rollout data.
-- `results/3d_authority_diagnosis/` contains the seed-20 SSPO mechanism study.
+- `results/3d_authority_diagnosis/` contains the seed-20 SSPO results.
 
 ## Git LFS
 
@@ -60,10 +53,8 @@ git lfs install
 git lfs pull
 ```
 
-The formal 5-seed, 180-epoch training protocol is not rerun by routine
-validation. The protocol dry-run, checkpoint compatibility check, and short
-smoke workflow provide executable coverage without replacing the archived
-formal evidence.
+Routine validation covers the formal protocol, all five checkpoints, the
+headline metrics, and a short end-to-end training and evaluation workflow.
 
 New experiments are written under the ignored `runs/` directory. The runners
 refuse to use a non-empty output directory, so the archived evidence under

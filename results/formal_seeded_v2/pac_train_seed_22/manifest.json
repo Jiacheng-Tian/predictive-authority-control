@@ -119,5 +119,5 @@
                   "uncertainty_gain":  0.0,
                   "uncertainty_threshold":  1.0
               },
-    "formal_scope_guardrail":  "The learned model predicts only authority alpha for an existing SMC primary plus MPC_3D authority blend. It is not a global neural controller."
+    "method_scope":  "PAC predicts authority alpha between the SMC primary and one-step predictive authority controller."
 }

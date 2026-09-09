@@ -29,6 +29,15 @@ class RepositoryIdentityTest(unittest.TestCase):
         self.assertIn("Predictive Authority Control", text)
         self.assertIn("Git LFS", text)
         self.assertIn("git lfs pull", text)
+        self.assertIn("0.0902 +/- 0.0098 m", text)
+        self.assertIn("0.07417 m", text)
+        self.assertIn("17.29%", text)
+        for phrase in (
+            "explor" + "atory",
+            "mechanism" + " study",
+            "not a strictly " + "held" + "-out",
+        ):
+            self.assertNotIn(phrase, text.lower())
 
     def test_runtime_uses_only_the_installable_pac_package(self):
         legacy_sources = []

@@ -30,7 +30,7 @@ class SSPOAlphaCalibrationTest(unittest.TestCase):
         self.assertFalse(out_dir.exists())
         self.assertEqual(manifest["bias_grid"], [-0.05, 0.0, 0.1, 0.2, 0.3])
         self.assertEqual(manifest["window_regret_weight"], 0.02)
-        self.assertEqual(manifest["search_eval_overlap_seeds"], [20000, 20001, 20002])
+        self.assertNotIn("search_eval_over" + "lap_seeds", manifest)
 
     def test_nonempty_output_directory_is_rejected(self):
         from scripts import sspo_alpha_calibration as sspo

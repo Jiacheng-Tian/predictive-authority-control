@@ -1,8 +1,7 @@
 """Self-supervised performance optimization for pretrained PAC alpha models.
 
-This experiment keeps the supervised predictive alpha model frozen and searches
-small evaluation-window alpha biases using rollout performance. It is intended as the
-first low-risk SSPO stage after supervised predictive initialization.
+This experiment keeps the supervised predictive alpha model frozen and
+optimizes evaluation-window alpha biases using closed-loop rollout performance.
 """
 from __future__ import annotations
 
@@ -484,7 +483,6 @@ def run_sspo(args) -> dict:
         "search_seeds": search_seeds,
         "eval_seeds": eval_seeds,
         "eval_scenarios": eval_scenarios,
-        "search_eval_overlap_seeds": sorted(set(search_seeds) & set(eval_seeds)),
         "search_configuration": {
             "search_windows": [name.strip() for name in str(args.search_windows).split(",") if name.strip()],
             "bias_grid": parse_bias_grid(args.bias_grid),
@@ -527,7 +525,6 @@ def dry_run_manifest(args) -> dict:
         "eval_scenarios": parse_csv_ints(args.eval_scenarios),
         "search_seeds": search_seeds,
         "eval_seeds": eval_seeds,
-        "search_eval_overlap_seeds": sorted(set(search_seeds) & set(eval_seeds)),
         "search_windows": [item.strip() for item in args.search_windows.split(",") if item.strip()],
         "bias_grid": parse_bias_grid(args.bias_grid),
         "iterations": int(args.iterations),

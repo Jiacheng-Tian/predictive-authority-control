@@ -116,7 +116,7 @@ class AUVSimulator:
         eta, nu = self.dynamics.step(wrench, current)
         self.current_step += 1
 
-        # Formal v2 compares the post-step state with the pre-step reference.
+        # Preserve formal-v2 metric timing for numerical compatibility.
         target = self._get_target(t)
         error = target - eta
         for index in (3, 4, 5):
