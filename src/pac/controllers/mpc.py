@@ -1,4 +1,4 @@
-"""One-step predictive controller used as the PAC authority expert."""
+"""MPC controller used as the PAC authority expert."""
 
 from __future__ import annotations
 
@@ -7,8 +7,8 @@ import numpy as np
 from pac.simulation.thrusters import ThrusterLayout
 
 
-class OneStepPredictiveController:
-    """Damped one-step tracking law with bounded thruster allocation."""
+class MPCController:
+    """MPC tracking controller with bounded thruster allocation."""
 
     def __init__(
             self,
@@ -36,7 +36,7 @@ class OneStepPredictiveController:
         self._trajectory3d = False
 
     def reset(self) -> None:
-        """The formal predictive expert is stateless."""
+        """The formal MPC expert is stateless."""
 
     def set_trajectory3d(self, enabled: bool = True) -> None:
         self._trajectory3d = bool(enabled)

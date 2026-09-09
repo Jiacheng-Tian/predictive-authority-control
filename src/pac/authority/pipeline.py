@@ -267,8 +267,7 @@ def run_experiment(args) -> tuple[pd.DataFrame, pd.DataFrame]:
             "model_dropout": args.model_dropout,
         },
         "method_scope": (
-            "PAC predicts authority alpha between the SMC primary and one-step "
-            "predictive authority controller."
+            "PAC predicts authority alpha between the SMC primary and MPC authority controller."
         ),
     }
     (out_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")

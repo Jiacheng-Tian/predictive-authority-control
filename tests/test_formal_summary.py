@@ -20,7 +20,7 @@ class FormalSummaryTest(unittest.TestCase):
         self.assertAlmostEqual(summary["pac"]["pooled_sample_sd"], 0.00979868270936307)
         self.assertAlmostEqual(summary["pac"]["training_seed_mean_sd"], 0.00128272608284843)
         self.assertAlmostEqual(summary["smc"]["mean_rmse_3d"], 0.14374800885215)
-        self.assertAlmostEqual(summary["predictive"]["mean_rmse_3d"], 0.145712776770692)
+        self.assertAlmostEqual(summary["mpc"]["mean_rmse_3d"], 0.145712776770692)
 
     def test_summary_cli_is_read_only_json(self):
         completed = subprocess.run(

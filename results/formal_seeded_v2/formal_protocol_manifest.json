@@ -2,7 +2,7 @@
   "version": "formal_seeded_v2_5trainx10eval",
   "main_methods": [
     "SMC",
-    "Authority controller",
+    "MPC",
     "PAC"
   ],
   "pac_training_seeds": [

@@ -19,7 +19,7 @@ class PACConfigTest(unittest.TestCase):
         self.assertEqual(config.environment.steps, 2100)
         self.assertEqual(config.environment.scenarios, (1, 2, 3))
         self.assertEqual(config.controllers.primary, "real10kg_smc_steady")
-        self.assertEqual(config.controllers.authority, "real10kg_predictive_event")
+        self.assertEqual(config.controllers.authority, "real10kg_mpc_event")
         self.assertEqual(config.authority.history_len, 16)
         self.assertEqual(config.authority.embed_dim, 32)
         self.assertEqual(config.authority.heads, 4)

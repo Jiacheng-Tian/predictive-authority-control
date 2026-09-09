@@ -29,7 +29,6 @@ class EnvironmentConfig:
 class ControllerConfig:
     primary: str
     authority: str
-    archived_authority_label: str
 
 
 @dataclass(frozen=True)
@@ -187,11 +186,10 @@ def load_config(path: str | Path) -> PACConfig:
     controller_config = ControllerConfig(
         primary=str(controllers["primary"]),
         authority=str(controllers["authority"]),
-        archived_authority_label=str(controllers["archived_authority_label"]),
     )
     if controller_config.primary != "real10kg_smc_steady":
         raise ValueError("unsupported primary controller")
-    if controller_config.authority != "real10kg_predictive_event":
+    if controller_config.authority != "real10kg_mpc_event":
         raise ValueError("unsupported authority controller")
 
     training_config = TrainingConfig(

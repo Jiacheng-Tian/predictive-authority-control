@@ -14,8 +14,7 @@ environment:
 
 controllers:
   primary: real10kg_smc_steady
-  authority: real10kg_predictive_event
-  archived_authority_label: real10kg_mpc_event
+  authority: real10kg_mpc_event
 
 authority:
   architecture: transformer

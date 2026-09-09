@@ -42,7 +42,7 @@ class FormalV2NumericalCompatibilityTest(unittest.TestCase):
 
     def test_formal_controller_actions_match_archived_semantics(self):
         from pac.controllers.presets import (
-            build_real10kg_predictive_event,
+            build_real10kg_mpc_event,
             build_real10kg_smc_steady,
         )
 
@@ -52,9 +52,9 @@ class FormalV2NumericalCompatibilityTest(unittest.TestCase):
         current = np.array([0.4, -0.15, 0.75])
 
         smc = build_real10kg_smc_steady()
-        predictive = build_real10kg_predictive_event()
+        mpc = build_real10kg_mpc_event()
         smc.set_trajectory3d(True)
-        predictive.set_trajectory3d(True)
+        mpc.set_trajectory3d(True)
 
         np.testing.assert_allclose(
             smc.compute(target, eta, nu, t=4.0, current_prediction=current),
@@ -63,7 +63,7 @@ class FormalV2NumericalCompatibilityTest(unittest.TestCase):
             atol=1.0e-12,
         )
         np.testing.assert_allclose(
-            predictive.compute(target, eta, nu, t=4.0, current_prediction=current),
+            mpc.compute(target, eta, nu, t=4.0, current_prediction=current),
             [-1.0, 1.0, 1.0, -1.0, 1.0, 1.0],
             rtol=0.0,
             atol=1.0e-12,
@@ -136,7 +136,7 @@ class FormalV2NumericalCompatibilityTest(unittest.TestCase):
             current_frequency_scale=1.0,
             vertical_current=0.75,
             primary_controller="real10kg_smc_steady",
-            authority_controller="real10kg_predictive_event",
+            authority_controller="real10kg_mpc_event",
             feature_mode="state_phase",
             initial_position_std=0.03,
             initial_velocity_std=0.01,

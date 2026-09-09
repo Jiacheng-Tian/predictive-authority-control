@@ -70,7 +70,7 @@ def build_formal_protocol_manifest(
     scenarios = list(DEFAULT_SCENARIOS if scenarios is None else scenarios)
     return {
         "version": "formal_seeded_v2_5trainx10eval",
-        "main_methods": ["SMC", "Authority controller", "PAC"],
+        "main_methods": ["SMC", "MPC", "PAC"],
         "pac_training_seeds": train_seeds,
         "evaluation_episode_seeds": eval_episode_seeds,
         "evaluation_scenarios": scenarios,

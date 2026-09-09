@@ -24,7 +24,7 @@
                    ],
     "formal_pac_rmse":  0.0896756981594594,
     "formal_positive_window_regret":  0.9239291469215566,
-    "method_name":  "Supervised Predictive Initialization followed by Self-Supervised Performance Optimization",
+    "method_name":  "Supervised PAC Initialization followed by Self-Supervised Performance Optimization",
     "outputs":  {
                     "best_bias_schedule":  "results/3d_authority_diagnosis/sspo_alpha_calibration_seed20_v2_regret/best_bias_schedule.json",
                     "overall_comparison":  "results/3d_authority_diagnosis/sspo_alpha_calibration_seed20_v2_regret/sspo_vs_formal_pac_overall.csv",

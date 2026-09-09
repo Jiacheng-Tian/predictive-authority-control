@@ -478,7 +478,7 @@ def run_sspo(args) -> dict:
     window_regret.to_csv(out_dir / "sspo_window_regret_summary.csv", index=False)
 
     summary = {
-        "method_name": "Supervised Predictive Initialization followed by Self-Supervised Performance Optimization",
+        "method_name": "Supervised PAC Initialization followed by Self-Supervised Performance Optimization",
         "best_bias_schedule": best_schedule,
         "search_seeds": search_seeds,
         "eval_seeds": eval_seeds,

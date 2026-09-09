@@ -28,11 +28,11 @@ def summarize_formal_results(results_dir: str | Path) -> dict[str, dict[str, flo
     pac["training_seed_mean_sd"] = float(seed_means.std(ddof=1))
 
     smc_rows = fixed_rows[fixed_rows["controller"].eq("real10kg_smc_steady")]
-    predictive_rows = fixed_rows[fixed_rows["controller"].eq("real10kg_mpc_event")]
-    if smc_rows.empty or predictive_rows.empty:
+    mpc_rows = fixed_rows[fixed_rows["controller"].eq("real10kg_mpc_event")]
+    if smc_rows.empty or mpc_rows.empty:
         raise ValueError("archived fixed-controller evidence is incomplete")
     return {
         "pac": pac,
         "smc": _method_summary(smc_rows),
-        "predictive": _method_summary(predictive_rows),
+        "mpc": _method_summary(mpc_rows),
     }

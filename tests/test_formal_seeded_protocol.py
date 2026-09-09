@@ -18,6 +18,7 @@ class FormalSeededProtocolTest(unittest.TestCase):
         self.assertEqual(manifest["evaluation_episodes_per_train_seed"], 10)
         self.assertEqual(manifest["total_pac_rollouts_per_scenario"], 50)
         self.assertEqual(manifest["fixed_controller_rollouts_per_scenario"], 10)
+        self.assertEqual(manifest["main_methods"], ["SMC", "MPC", "PAC"])
         self.assertEqual(manifest["output_directory"], "runs/formal_seeded_v2")
         self.assertEqual(manifest["figure_directory"], "runs/formal_seeded_v2/figures")
         self.assertEqual(manifest["pac"]["epochs"], 180)
@@ -208,7 +209,7 @@ class FormalSeededProtocolTest(unittest.TestCase):
         eval_seed_index = command.index("--eval-seeds") + 1
         self.assertEqual(command[eval_seed_index], "20000,20001")
         authority_index = command.index("--authority-controller") + 1
-        self.assertEqual(command[authority_index], "real10kg_predictive_event")
+        self.assertEqual(command[authority_index], "real10kg_mpc_event")
         self.assertEqual(command[1:3], ["-m", "pac.authority.pipeline"])
 
     def test_fixed_controller_command_uses_ten_unique_episodes_once(self):

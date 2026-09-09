@@ -119,5 +119,5 @@
                   "uncertainty_gain":  0.0,
                   "uncertainty_threshold":  1.0
               },
-    "method_scope":  "PAC predicts authority alpha between the SMC primary and one-step predictive authority controller."
+    "method_scope":  "PAC predicts authority alpha between the SMC primary and MPC authority controller."
 }

@@ -32,7 +32,7 @@ REQUIRED_FILES = [
     "src/pac/simulation/thrusters.py",
     "src/pac/simulation/vehicle_profiles.py",
     "src/pac/controllers/smc.py",
-    "src/pac/controllers/predictive.py",
+    "src/pac/controllers/mpc.py",
     "src/pac/controllers/presets.py",
     "src/pac/authority/features.py",
     "src/pac/authority/model.py",
@@ -130,7 +130,7 @@ def verify_evidence(failures: list[str]) -> None:
             ("pac", "pooled_sample_sd"): 0.00979868270936307,
             ("pac", "training_seed_mean_sd"): 0.00128272608284843,
             ("smc", "mean_rmse_3d"): 0.14374800885215,
-            ("predictive", "mean_rmse_3d"): 0.145712776770692,
+            ("mpc", "mean_rmse_3d"): 0.145712776770692,
         }
         for (method, metric), value in expected.items():
             if abs(float(summary[method][metric]) - value) > 1.0e-12:

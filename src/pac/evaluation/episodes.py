@@ -6,7 +6,7 @@ import pandas as pd
 
 from pac.simulation.core import AUVSimulator
 from pac.controllers.presets import (
-    build_real10kg_predictive_event,
+    build_real10kg_mpc_event,
     build_real10kg_smc_steady,
 )
 from pac.evaluation.metrics import compute_timeseries_engineering_metrics
@@ -100,8 +100,8 @@ def build_controller(name: str):
     controller_name = str(name or "real10kg_smc_steady").strip().lower()
     if controller_name == "real10kg_smc_steady":
         return "real10kg_smc_steady", build_real10kg_smc_steady()
-    if controller_name == "real10kg_predictive_event":
-        return "real10kg_mpc_event", build_real10kg_predictive_event()
+    if controller_name == "real10kg_mpc_event":
+        return "real10kg_mpc_event", build_real10kg_mpc_event()
     raise ValueError(f"Unknown current-version controller: {controller_name}")
 
 

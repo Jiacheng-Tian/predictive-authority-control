@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-from pac.controllers.predictive import OneStepPredictiveController
+from pac.controllers.mpc import MPCController
 from pac.controllers.smc import SMCController
 from pac.simulation.thrusters import build_real_10kg_x_layout
 from pac.simulation.vehicle_profiles import get_vehicle_profile
 
 
-def build_real10kg_predictive_event() -> OneStepPredictiveController:
-    """Build the one-step predictive authority expert."""
+def build_real10kg_mpc_event() -> MPCController:
+    """Build the MPC authority expert."""
     profile = get_vehicle_profile("real_10kg_v1")
-    return OneStepPredictiveController(
+    return MPCController(
         M=profile.effective_mass,
         D=profile.linear_damping,
         D_quad=profile.quadratic_damping,

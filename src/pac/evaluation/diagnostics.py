@@ -274,7 +274,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--vertical-current", type=float, default=0.75)
     parser.add_argument("--vehicle-profile", default="real_10kg_v1")
     parser.add_argument("--thruster-layout", default="real_10kg_x")
-    parser.add_argument("--base-controllers", default="real10kg_smc_steady,real10kg_predictive_event")
+    parser.add_argument("--base-controllers", default="real10kg_smc_steady,real10kg_mpc_event")
     parser.add_argument("--reference-controller", default="real10kg_smc_steady")
     parser.add_argument("--no-figures", action="store_true")
     return parser

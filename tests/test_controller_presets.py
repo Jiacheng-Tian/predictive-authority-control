@@ -6,7 +6,7 @@ import numpy as np
 class ControllerPresetContractTest(unittest.TestCase):
     def test_current_real10kg_presets_construct_and_compute_finite_actions(self):
         from pac.controllers.presets import (
-            build_real10kg_predictive_event,
+            build_real10kg_mpc_event,
             build_real10kg_smc_steady,
         )
 
@@ -15,7 +15,7 @@ class ControllerPresetContractTest(unittest.TestCase):
         nu = np.zeros(6, dtype=float)
         current = np.array([0.2, -0.1, 0.05], dtype=float)
 
-        for builder in [build_real10kg_smc_steady, build_real10kg_predictive_event]:
+        for builder in [build_real10kg_smc_steady, build_real10kg_mpc_event]:
             controller = builder()
             controller.set_trajectory3d(True)
             action = controller.compute(

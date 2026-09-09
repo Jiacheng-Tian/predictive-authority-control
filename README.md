@@ -1,7 +1,7 @@
 # Predictive Authority Control
 
 Predictive Authority Control (PAC) learns a bounded temporal authority
-coefficient that blends explicit sliding-mode and one-step predictive
+coefficient that blends explicit sliding-mode and MPC
 controllers for 6-DOF AUV trajectory tracking in simulation.
 
 ## Evidence
@@ -9,13 +9,12 @@ controllers for 6-DOF AUV trajectory tracking in simulation.
 The formal simulation result evaluates five independently trained PAC models
 (training seeds 20-24) over ten evaluation episodes and three current
 scenarios. PAC achieves aggregate 3-D position RMSE of `0.0902 +/- 0.0098 m`.
-This improves on the SMC and one-step predictive controllers by 37.2% and
+This improves on the SMC and MPC controllers by 37.2% and
 38.1%, respectively. After SSPO calibration, the seed-20 model reaches
 `0.07417 m`, a further 17.29% RMSE reduction from its supervised PAC result.
 
 All reported results are obtained in a 6-DOF AUV simulation. PAC blends an
-explicit SMC primary controller with a lightweight one-step predictive
-authority controller.
+explicit SMC primary controller with an MPC authority controller.
 
 ## Quick Start
 

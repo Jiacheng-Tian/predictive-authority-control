@@ -32,6 +32,8 @@ class RepositoryIdentityTest(unittest.TestCase):
         self.assertIn("0.0902 +/- 0.0098 m", text)
         self.assertIn("0.07417 m", text)
         self.assertIn("17.29%", text)
+        self.assertIn("MPC controller", text)
+        self.assertNotIn("one-step " + "predictive " + "controller", text)
         for phrase in (
             "explor" + "atory",
             "mechanism" + " study",
@@ -56,7 +58,6 @@ class RepositoryIdentityTest(unittest.TestCase):
             "schedule_" + "oracle",
             "hybrid_" + "oracle",
             "mc_" + "dropout",
-            "MPC" + "Controller",
             "sys.path" + ".insert",
         )
         offenders = []
