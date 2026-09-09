@@ -44,31 +44,14 @@ class MPCQPSettings:
     max_iter: int = 1000
     time_limit_s: float = 0.0075
     accept_inaccurate_residual: float = 1.0e-3
-    horizon: int | None = None
-    control_min: float | None = None
-    control_max: float | None = None
-    max_delta_per_step: float | None = None
-    q_terminal_diag: tuple[float, ...] | None = None
-    u_lower: float | None = None
-    u_upper: float | None = None
-    du_max: float | None = None
-    command_min: float | None = None
-    command_max: float | None = None
+    max_consecutive_plan_reuse: int = 3
 
     def __post_init__(self) -> None:
         if isinstance(self.N, bool) or not isinstance(self.N, (int, np.integer)):
             raise ValueError("N must be an integer")
         n = int(self.N)
-        if self.horizon is not None:
-            if isinstance(self.horizon, bool) or not isinstance(self.horizon, (int, np.integer)):
-                raise ValueError("horizon must be an integer")
-            horizon = int(self.horizon)
-            if n != 20 and n != horizon:
-                raise ValueError("N and horizon disagree")
-            n = horizon
-            object.__setattr__(self, "N", n)
-        if n <= 0:
-            raise ValueError("N must be positive")
+        if n <= 0 or n > 200:
+            raise ValueError("N must be in [1, 200]")
         object.__setattr__(self, "N", n)
 
         try:
@@ -85,22 +68,9 @@ class MPCQPSettings:
         object.__setattr__(self, "r_diag", r)
         object.__setattr__(self, "s_diag", s)
 
-        lower = self.u_min if self.control_min is None else self.control_min
-        upper = self.u_max if self.control_max is None else self.control_max
-        slew = self.slew_limit if self.max_delta_per_step is None else self.max_delta_per_step
-        if self.u_lower is not None:
-            lower = self.u_lower
-        if self.u_upper is not None:
-            upper = self.u_upper
-        if self.du_max is not None:
-            slew = self.du_max
-        if self.command_min is not None:
-            lower = self.command_min
-        if self.command_max is not None:
-            upper = self.command_max
-        lower = float(lower)
-        upper = float(upper)
-        slew = float(slew)
+        lower = float(self.u_min)
+        upper = float(self.u_max)
+        slew = float(self.slew_limit)
         if not np.isfinite(lower) or not np.isfinite(upper) or lower >= upper:
             raise ValueError("control bounds must be finite and ordered")
         if not np.isfinite(slew) or slew <= 0.0:
@@ -111,20 +81,18 @@ class MPCQPSettings:
         if not np.isfinite(float(self.terminal_scale)) or float(self.terminal_scale) < 0.0:
             raise ValueError("terminal_scale must be finite and non-negative")
         object.__setattr__(self, "terminal_scale", float(self.terminal_scale))
-        if self.q_terminal_diag is not None:
-            terminal_diag = tuple(float(value) for value in self.q_terminal_diag)
-            if len(terminal_diag) != NX or not all(
-                np.isfinite(value) and value >= 0.0 for value in terminal_diag
-            ):
-                raise ValueError("q_terminal_diag must be finite and positive semidefinite")
-        else:
-            terminal_diag = tuple(value * self.terminal_scale for value in q)
-        object.__setattr__(self, "q_terminal_diag", terminal_diag)
         if isinstance(self.max_iter, bool) or not isinstance(self.max_iter, (int, np.integer)):
             raise ValueError("max_iter must be an integer")
         if int(self.max_iter) <= 0:
             raise ValueError("max_iter must be positive")
         object.__setattr__(self, "max_iter", int(self.max_iter))
+        if (
+            isinstance(self.max_consecutive_plan_reuse, bool)
+            or not isinstance(self.max_consecutive_plan_reuse, (int, np.integer))
+            or int(self.max_consecutive_plan_reuse) <= 0
+        ):
+            raise ValueError("max_consecutive_plan_reuse must be a positive integer")
+        object.__setattr__(self, "max_consecutive_plan_reuse", int(self.max_consecutive_plan_reuse))
         for name in (
             "eps_abs",
             "eps_rel",
@@ -137,44 +105,8 @@ class MPCQPSettings:
             object.__setattr__(self, name, value)
 
     @property
-    def q(self) -> np.ndarray:
-        return np.diag(self.q_diag)
-
-    @property
-    def q_terminal(self) -> np.ndarray:
-        return np.diag(self.q_terminal_diag)
-
-    @property
-    def Q(self) -> np.ndarray:
-        return self.q
-
-    @property
-    def QN(self) -> np.ndarray:
-        return self.q_terminal
-
-    @property
-    def R(self) -> np.ndarray:
-        return self.r
-
-    @property
-    def S(self) -> np.ndarray:
-        return self.s
-
-    @property
-    def r(self) -> np.ndarray:
-        return np.diag(self.r_diag)
-
-    @property
-    def s(self) -> np.ndarray:
-        return np.diag(self.s_diag)
-
-    @property
-    def nx(self) -> int:
-        return NX
-
-    @property
-    def nu(self) -> int:
-        return NU
+    def horizon(self) -> int:
+        return self.N
 
 
 @dataclass(frozen=True)
@@ -270,26 +202,35 @@ class LinearMPCQP:
         return self.n_state_vars + k * NU + i
 
     def _build_cost_matrix(self) -> None:
-        p = np.zeros((self.nvar, self.nvar), dtype=float)
         q_diag = np.asarray(self.settings.q_diag, dtype=float)
+        entries: dict[tuple[int, int], float] = {}
         for k in range(self.N):
-            indices = [self._x_index(k, i) for i in range(NX)]
-            p[np.ix_(indices, indices)] += 2.0 * np.diag(q_diag)
-        terminal = [self._x_index(self.N, i) for i in range(NX)]
-        p[np.ix_(terminal, terminal)] += 2.0 * np.diag(self.settings.q_terminal_diag)
+            for i in range(NX):
+                entries[(self._x_index(k, i), self._x_index(k, i))] = 2.0 * q_diag[i]
+        for i in range(NX):
+            index = self._x_index(self.N, i)
+            entries[(index, index)] = 2.0 * q_diag[i] * self.settings.terminal_scale
 
         r_diag = np.asarray(self.settings.r_diag, dtype=float)
         s_diag = np.asarray(self.settings.s_diag, dtype=float)
         for k in range(self.N):
             for i in range(NU):
                 index = self._u_index(k, i)
-                p[index, index] += 2.0 * (r_diag[i] + s_diag[i])
+                entries[(index, index)] = entries.get((index, index), 0.0) + 2.0 * (r_diag[i] + s_diag[i])
                 if k:
                     previous = self._u_index(k - 1, i)
-                    p[previous, previous] += 2.0 * s_diag[i]
-                    p[index, previous] -= 2.0 * s_diag[i]
-                    p[previous, index] -= 2.0 * s_diag[i]
-        self._P = sparse.csc_matrix(np.triu(p))
+                    entries[(previous, previous)] = entries.get((previous, previous), 0.0) + 2.0 * s_diag[i]
+                    entries[(previous, index)] = entries.get((previous, index), 0.0) - 2.0 * s_diag[i]
+        nonzero_entries = [
+            (row, col, value)
+            for (row, col), value in sorted(entries.items())
+            if value != 0.0
+        ]
+        if nonzero_entries:
+            rows, cols, data = zip(*nonzero_entries)
+            self._P = sparse.csc_matrix((data, (rows, cols)), shape=(self.nvar, self.nvar))
+        else:
+            self._P = sparse.csc_matrix((self.nvar, self.nvar))
 
     def _build_constraint_pattern(self) -> None:
         rows: list[int] = []
@@ -417,7 +358,7 @@ class LinearMPCQP:
         for k in range(self.N):
             linear[k * NX:(k + 1) * NX] = -2.0 * q * xref[k]
         start = self._x_index(self.N, 0)
-        linear[start:start + NX] = -2.0 * np.asarray(self.settings.q_terminal_diag) * xref[self.N]
+        linear[start:start + NX] = -2.0 * q * self.settings.terminal_scale * xref[self.N]
         s = np.asarray(self.settings.s_diag, dtype=float)
         linear[self.n_state_vars:self.n_state_vars + NU] = -2.0 * s * u_prev
         return linear
@@ -453,6 +394,7 @@ class LinearMPCQP:
         A, B, c, x0, xref, u_prev = self._validate_inputs(A, B, c, x0, xref, u_prev)
         ax, lower, upper = self._constraint_values(A, B, c, x0, u_prev)
         linear = self._linear_term(xref, u_prev)
+        started = time.perf_counter()
         warm_vector = self._shift_primal()
         warm_started = warm_vector is not None
         if warm_vector is not None:
@@ -460,7 +402,6 @@ class LinearMPCQP:
         self._solver.update(q=linear, l=lower, u=upper, Ax=ax)
         self._last_l = lower
         self._last_u = upper
-        started = time.perf_counter()
         result = self._solver.solve()
         wall_time = time.perf_counter() - started
         info = result.info

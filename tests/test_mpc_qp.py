@@ -2,11 +2,59 @@ from __future__ import annotations
 
 import unittest
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import numpy as np
 
 
 class LinearMPCQPTest(unittest.TestCase):
+    def test_settings_have_only_frozen_canonical_fields_and_bound_horizon(self):
+        from pac.controllers.mpc_qp import MPCQPSettings
+
+        settings = MPCQPSettings(N=10)
+        self.assertEqual(settings.N, 10)
+        self.assertEqual(settings.horizon, 10)
+        self.assertEqual(settings.max_consecutive_plan_reuse, 3)
+        with self.assertRaises(TypeError):
+            MPCQPSettings(horizon=10)
+        with self.assertRaises(TypeError):
+            MPCQPSettings(q_terminal_diag=[1.0] * 12)
+        with self.assertRaises(ValueError):
+            MPCQPSettings(N=201)
+
+    def test_large_horizon_uses_sparse_cost_without_dense_nvar_square_allocation(self):
+        from pac.controllers.mpc_qp import LinearMPCQP, MPCQPSettings
+
+        original_zeros = np.zeros
+
+        def guarded_zeros(shape, *args, **kwargs):
+            if isinstance(shape, tuple) and len(shape) == 2 and shape[0] > 1000 and shape[1] > 1000:
+                raise AssertionError("dense nvar-square allocation")
+            return original_zeros(shape, *args, **kwargs)
+
+        with patch("pac.controllers.mpc_qp.np.zeros", side_effect=guarded_zeros):
+            solver = LinearMPCQP(MPCQPSettings(N=200))
+        self.assertTrue(solver._P.format == "csc")
+        self.assertLess(solver._P.nnz, solver.nvar * 20)
+
+    def test_qp_wall_time_includes_update_and_warm_start_work(self):
+        from pac.controllers.mpc_qp import LinearMPCQP, MPCQPSettings
+
+        solver = LinearMPCQP(MPCQPSettings(N=1))
+        A = np.eye(12)
+        B = np.zeros((12, 6))
+        args = (A, B, np.zeros(12), np.zeros(12), np.zeros((2, 12)), np.zeros(6))
+        original_update = solver._solver.update
+
+        def slow_update(*args, **kwargs):
+            import time
+            time.sleep(0.002)
+            return original_update(*args, **kwargs)
+
+        solver._solver.update = slow_update
+        solution = solver.solve(*args)
+        self.assertGreaterEqual(solution.wall_time, 0.002)
+
     def test_solved_inaccurate_requires_both_residuals_but_solved_uses_plan_checks(self):
         from pac.controllers.mpc_qp import LinearMPCQP, MPCQPSettings
 
