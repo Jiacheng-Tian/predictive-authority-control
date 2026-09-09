@@ -133,6 +133,7 @@ def run_predictive_alpha_episode(
     rolls, pitches, desired_rolls, desired_pitches = [], [], [], []
     xs, ys, zs, target_zs, z_errors = [], [], [], [], []
     active_values, alpha_values, raw_values = [], [], []
+    forced_primary_values = []
     history = []
     previous_alpha = 0.0
     done = False
@@ -146,6 +147,10 @@ def run_predictive_alpha_episode(
         )
         authority_action = compute_controller_action(
             authority, authority_name, target, dynamics.eta, dynamics.nu, t, dynamics.dt, current
+        )
+        authority_forced_primary = bool(
+            getattr(authority, "force_primary_authority", False)
+            or getattr(authority, "force_primary", False)
         )
         feature = build_alpha_feature(
             target,
@@ -175,6 +180,8 @@ def run_predictive_alpha_episode(
             rate_limit=alpha_rate_limit,
             deadband=alpha_deadband,
         )
+        if authority_forced_primary:
+            alpha = 0.0
         action, blend_info = blend_actions_with_predicted_alpha(
             primary_action,
             authority_action,
@@ -196,6 +203,7 @@ def run_predictive_alpha_episode(
         active_values.append(float(blend_info["authority_active"]))
         alpha_values.append(float(blend_info["authority_alpha"]))
         raw_values.append(float(alpha_raw))
+        forced_primary_values.append(bool(authority_forced_primary))
 
         # Formal v2 records the pre-step state alongside the post-step error.
         done, step_info = environment.step(action)
@@ -225,6 +233,8 @@ def run_predictive_alpha_episode(
         "authority_active_fraction": float(np.mean(active_values)),
         "authority_alpha_mean": float(np.mean(alpha_values)),
         "authority_alpha_std": float(np.std(alpha_values)),
+        "authority_forced_primary": bool(any(forced_primary_values)),
+        "authority_forced_primary_fraction": float(np.mean(forced_primary_values)),
         "alpha_raw_mean": float(np.mean(raw_values)),
         "alpha_uncertainty_std": 0.0,
         "policy_architecture": "transformer",
@@ -264,6 +274,7 @@ def run_predictive_alpha_episode(
         "z_error": z_errors,
         "authority_active": active_values,
         "authority_alpha": alpha_values,
+        "authority_forced_primary": forced_primary_values,
         "alpha_raw": raw_values,
         "alpha_uncertainty": np.zeros(len(raw_values)),
     })

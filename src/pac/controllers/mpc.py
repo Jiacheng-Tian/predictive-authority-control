@@ -73,6 +73,8 @@ class MPCController:
             wall_time=0.0,
             run_time=0.0,
             residual=float("inf"),
+            primal_residual=float("inf"),
+            dual_residual=float("inf"),
             warm_started=False,
             fallback_mode="none",
             consecutive_failures=0,
@@ -131,6 +133,8 @@ class MPCController:
             wall_time=0.0,
             run_time=0.0,
             residual=float("inf"),
+            primal_residual=float("inf"),
+            dual_residual=float("inf"),
             warm_started=False,
             fallback_mode="none",
             consecutive_failures=0,
@@ -242,7 +246,12 @@ class MPCController:
             fp = self._transition(state, action + perturbation, current)
             fm = self._transition(state, action - perturbation, current)
             B[:, index] = self._wrapped_state_difference(fp, fm) / (2.0 * self.control_eps)
-        c = f0 - A @ state - B @ action
+        continuous_f0 = f0.copy()
+        continuous_f0[3:6] = state[3:6] + [
+            self._wrap_angle(value)
+            for value in (f0[3:6] - state[3:6])
+        ]
+        c = continuous_f0 - A @ state - B @ action
         return A, B, c
 
     def linearize(self, eta, nu, previous_action, current_prediction=None):
@@ -274,28 +283,58 @@ class MPCController:
         return self._project_sequence(shifted, self._last_action)
 
     @staticmethod
-    def _solution_is_accepted(solution) -> bool:
-        accepted = getattr(solution, "accepted", None)
-        if accepted is not None:
-            return bool(accepted)
+    def _solution_is_accepted(solution, expected_N: int | None = None) -> bool:
         status = str(getattr(solution, "status", "")).strip().lower()
+        try:
+            plan = np.asarray(getattr(solution, "plan"), dtype=float)
+            state_plan = np.asarray(getattr(solution, "state_plan"), dtype=float)
+            violation = float(getattr(solution, "constraint_violation"))
+        except (TypeError, ValueError, AttributeError):
+            return False
+        horizon = plan.shape[0] if expected_N is None and plan.ndim == 2 else expected_N
+        if horizon is None or plan.shape != (int(horizon), 6) or state_plan.shape != (int(horizon) + 1, 12):
+            return False
+        if not np.isfinite(plan).all() or not np.isfinite(state_plan).all():
+            return False
+        if not np.isfinite(violation) or violation > 1.0e-3:
+            return False
         if status == "solved":
             return True
-        if status == "solved inaccurate":
-            residual = float(getattr(solution, "residual", np.inf))
-            return residual <= 1.0e-3
-        return False
+        if status != "solved inaccurate":
+            return False
+        aggregate = getattr(solution, "residual", None)
+        try:
+            aggregate = float(aggregate) if aggregate is not None else float("inf")
+            primal_value = getattr(solution, "primal_residual", None)
+            dual_value = getattr(solution, "dual_residual", None)
+            primal = aggregate if primal_value is None else float(primal_value)
+            dual = aggregate if dual_value is None else float(dual_value)
+        except (TypeError, ValueError, OverflowError):
+            return False
+        return (
+            np.isfinite(primal)
+            and np.isfinite(dual)
+            and primal <= 1.0e-3
+            and dual <= 1.0e-3
+        )
 
     def _record_solution_telemetry(self, solution, fallback_mode: str) -> None:
         wall_time = float(getattr(solution, "wall_time", 0.0))
         run_time = float(getattr(solution, "run_time", 0.0))
+        aggregate = float(getattr(solution, "residual", np.inf))
+        primal_value = getattr(solution, "primal_residual", None)
+        dual_value = getattr(solution, "dual_residual", None)
+        primal_residual = aggregate if primal_value is None else float(primal_value)
+        dual_residual = aggregate if dual_value is None else float(dual_value)
         self._set_telemetry(
             solver_status=str(getattr(solution, "status", "unknown")),
-            accepted=self._solution_is_accepted(solution),
+            accepted=self._solution_is_accepted(solution, self.settings.N),
             iterations=int(getattr(solution, "iter", getattr(solution, "iterations", 0))),
             wall_time=wall_time,
             run_time=run_time,
-            residual=float(getattr(solution, "residual", np.inf)),
+            residual=aggregate,
+            primal_residual=primal_residual,
+            dual_residual=dual_residual,
             warm_started=bool(getattr(solution, "warm_started", False)),
             fallback_mode=fallback_mode,
             consecutive_failures=self._consecutive_failures,
@@ -340,7 +379,7 @@ class MPCController:
                 xref,
                 self._last_action,
             )
-            if not self._solution_is_accepted(solution):
+            if not self._solution_is_accepted(solution, self.settings.N):
                 raise _RejectedSolution(solution)
             plan = np.asarray(solution.plan, dtype=float)
             if plan.shape != (self.settings.N, 6) or not np.isfinite(plan).all():
@@ -371,6 +410,8 @@ class MPCController:
                         wall_time=0.0,
                         run_time=0.0,
                         residual=float("inf"),
+                        primal_residual=float("inf"),
+                        dual_residual=float("inf"),
                         warm_started=False,
                         fallback_mode="reuse_plan",
                         consecutive_failures=self._consecutive_failures,
@@ -402,6 +443,8 @@ class MPCController:
                         wall_time=0.0,
                         run_time=0.0,
                         residual=float("inf"),
+                        primal_residual=float("inf"),
+                        dual_residual=float("inf"),
                         warm_started=False,
                         fallback_mode="smc",
                         consecutive_failures=self._consecutive_failures,

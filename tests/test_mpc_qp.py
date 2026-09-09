@@ -1,11 +1,90 @@
 from __future__ import annotations
 
 import unittest
+from types import SimpleNamespace
 
 import numpy as np
 
 
 class LinearMPCQPTest(unittest.TestCase):
+    def test_solved_inaccurate_requires_both_residuals_but_solved_uses_plan_checks(self):
+        from pac.controllers.mpc_qp import LinearMPCQP, MPCQPSettings
+
+        def run(status, primal_residual, dual_residual):
+            solver = LinearMPCQP(MPCQPSettings(N=1))
+            A = np.eye(12)
+            B = np.zeros((12, 6))
+            args = (A, B, np.zeros(12), np.zeros(12), np.zeros((2, 12)), np.zeros(6))
+            baseline = solver.solve(*args)
+            raw = solver._previous_primal.copy()
+            solver._solver.solve = lambda: SimpleNamespace(
+                info=SimpleNamespace(
+                    status=status,
+                    iter=1,
+                    run_time=0.0,
+                    prim_res=primal_residual,
+                    dual_res=dual_residual,
+                ),
+                x=raw,
+            )
+            return solver.solve(*args)
+
+        self.assertTrue(run("solved inaccurate", 5.0e-4, 5.0e-4).accepted)
+        self.assertFalse(run("solved inaccurate", 2.0e-3, 5.0e-4).accepted)
+        self.assertFalse(run("solved inaccurate", 5.0e-4, 2.0e-3).accepted)
+        self.assertTrue(run("solved", 2.0, 2.0).accepted)
+
+    def test_rejected_raw_primal_does_not_replace_previous_warm_start(self):
+        from pac.controllers.mpc_qp import LinearMPCQP, MPCQPSettings
+
+        solver = LinearMPCQP(MPCQPSettings(N=1))
+        A = np.eye(12)
+        B = np.zeros((12, 6))
+        args = (A, B, np.zeros(12), np.zeros(12), np.zeros((2, 12)), np.zeros(6))
+        solver.solve(*args)
+        previous = solver._previous_primal.copy()
+        solver._solver.solve = lambda: SimpleNamespace(
+            info=SimpleNamespace(
+                status="solved",
+                iter=1,
+                run_time=0.0,
+                prim_res=0.0,
+                dual_res=0.0,
+            ),
+            x=np.full(solver.nvar, np.nan),
+        )
+
+        result = solver.solve(*args)
+
+        self.assertFalse(result.accepted)
+        np.testing.assert_array_equal(solver._previous_primal, previous)
+
+    def test_finite_but_infeasible_raw_primal_is_rejected_and_not_warmed(self):
+        from pac.controllers.mpc_qp import LinearMPCQP, MPCQPSettings
+
+        solver = LinearMPCQP(MPCQPSettings(N=1))
+        A = np.eye(12)
+        B = np.zeros((12, 6))
+        args = (A, B, np.zeros(12), np.ones(12), np.zeros((2, 12)), np.zeros(6))
+        solver.solve(A, B, np.zeros(12), np.zeros(12), np.zeros((2, 12)), np.zeros(6))
+        previous = solver._previous_primal.copy()
+        solver._solver.solve = lambda: SimpleNamespace(
+            info=SimpleNamespace(
+                status="solved",
+                iter=1,
+                run_time=0.0,
+                prim_res=0.0,
+                dual_res=0.0,
+            ),
+            x=np.zeros(solver.nvar),
+        )
+
+        result = solver.solve(*args)
+
+        self.assertFalse(result.accepted)
+        self.assertGreater(result.constraint_violation, 1.0e-3)
+        np.testing.assert_array_equal(solver._previous_primal, previous)
+
     def test_solution_respects_dynamics_amplitude_and_slew(self):
         from pac.controllers.mpc_qp import LinearMPCQP, MPCQPSettings
 

@@ -191,8 +191,8 @@ class MPCSolution:
     warm_started: bool
     constraint_violation: float
     accepted: bool | None = None
-    primal_residual: float = float("inf")
-    dual_residual: float = float("inf")
+    primal_residual: float | None = None
+    dual_residual: float | None = None
 
     def __post_init__(self) -> None:
         plan = np.array(self.plan, dtype=float, copy=True)
@@ -203,15 +203,11 @@ class MPCSolution:
         object.__setattr__(self, "state_plan", state_plan)
         object.__setattr__(self, "status", str(self.status))
         object.__setattr__(self, "iter", int(self.iter))
-        for name in (
-            "run_time",
-            "wall_time",
-            "residual",
-            "constraint_violation",
-            "primal_residual",
-            "dual_residual",
-        ):
+        for name in ("run_time", "wall_time", "residual", "constraint_violation"):
             object.__setattr__(self, name, float(getattr(self, name)))
+        for name in ("primal_residual", "dual_residual"):
+            value = getattr(self, name)
+            object.__setattr__(self, name, None if value is None else float(value))
         object.__setattr__(self, "warm_started", bool(self.warm_started))
         if self.accepted is not None:
             object.__setattr__(self, "accepted", bool(self.accepted))
@@ -469,30 +465,45 @@ class LinearMPCQP:
         wall_time = time.perf_counter() - started
         info = result.info
         status = str(getattr(info, "status", "unknown")).strip().lower()
-        run_time = float(getattr(info, "run_time", wall_time))
+        run_time_value = getattr(info, "run_time", wall_time)
+        run_time = float(wall_time if run_time_value is None else run_time_value)
         iterations = int(getattr(info, "iter", 0))
-        primal_residual = float(getattr(info, "prim_res", float("inf")))
-        dual_residual = float(getattr(info, "dual_res", float("inf")))
+        primal_value = getattr(info, "prim_res", float("inf"))
+        dual_value = getattr(info, "dual_res", float("inf"))
+        primal_residual = float("inf") if primal_value is None else float(primal_value)
+        dual_residual = float("inf") if dual_value is None else float(dual_value)
         residual = max(primal_residual, dual_residual)
-        accepted = status == "solved" or (
-            status == "solved inaccurate"
-            and primal_residual <= self.settings.accept_inaccurate_residual
-            and dual_residual <= self.settings.accept_inaccurate_residual
-        )
         primal = getattr(result, "x", None)
-        if primal is None:
+        raw_primal_valid = primal is not None
+        if raw_primal_valid:
+            try:
+                primal = np.asarray(primal, dtype=float).reshape(-1)
+            except (TypeError, ValueError):
+                raw_primal_valid = False
+        if raw_primal_valid:
+            raw_primal_valid = primal.size == self.nvar and np.isfinite(primal).all()
+        if not raw_primal_valid:
             primal = np.zeros(self.nvar, dtype=float)
-        else:
-            primal = np.asarray(primal, dtype=float).reshape(-1)
-            if primal.size != self.nvar:
-                primal = np.zeros(self.nvar, dtype=float)
-        if np.isfinite(primal).all():
-            self._previous_primal = primal.copy()
         state_plan = primal[:self.n_state_vars].reshape(self.N + 1, NX).copy()
         plan = primal[self.n_state_vars:].reshape(self.N, NU).copy()
         constraint_matrix = self._A_template.copy()
         constraint_matrix.data = ax
         violation = self._constraint_violation(primal, constraint_matrix, lower, upper)
+        status_accepted = status == "solved" or (
+            status == "solved inaccurate"
+            and primal_residual <= self.settings.accept_inaccurate_residual
+            and dual_residual <= self.settings.accept_inaccurate_residual
+        )
+        accepted = bool(
+            raw_primal_valid
+            and np.isfinite(plan).all()
+            and np.isfinite(state_plan).all()
+            and np.isfinite(violation)
+            and violation <= self.settings.accept_inaccurate_residual
+            and status_accepted
+        )
+        if accepted:
+            self._previous_primal = primal.copy()
         return MPCSolution(
             plan=plan,
             state_plan=state_plan,
