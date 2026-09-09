@@ -18,8 +18,8 @@ class FormalSeededProtocolTest(unittest.TestCase):
         self.assertEqual(manifest["evaluation_episodes_per_train_seed"], 10)
         self.assertEqual(manifest["total_pac_rollouts_per_scenario"], 50)
         self.assertEqual(manifest["fixed_controller_rollouts_per_scenario"], 10)
-        self.assertEqual(manifest["output_directory"], "results/formal_seeded_v2")
-        self.assertEqual(manifest["figure_directory"], "results/figures/formal_seeded_v2")
+        self.assertEqual(manifest["output_directory"], "runs/formal_seeded_v2")
+        self.assertEqual(manifest["figure_directory"], "runs/formal_seeded_v2/figures")
         self.assertEqual(manifest["pac"]["epochs"], 180)
         self.assertEqual(manifest["pac"]["policy_architecture"], "transformer")
         self.assertNotIn("NN direct control", manifest["main_methods"])
@@ -86,6 +86,43 @@ class FormalSeededProtocolTest(unittest.TestCase):
         self.assertIn("episode_uid", window.columns)
         self.assertEqual(set(timeseries["train_seed"]), {20, 21})
         self.assertEqual(set(timeseries["eval_episode"]), {0})
+
+    def test_write_merged_outputs_does_not_duplicate_timeseries(self):
+        from scripts import run_formal_seeded_protocol as protocol
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = root / "pac_train_seed_20"
+            (run_dir / "timeseries").mkdir(parents=True)
+            pd.DataFrame([{
+                "method": "predictive_alpha",
+                "scenario": "constant",
+                "scenario_id": 1,
+                "seed": 20000,
+                "rmse": 0.1,
+            }]).to_csv(run_dir / "raw_metrics.csv", index=False)
+            pd.DataFrame([{
+                "method": "predictive_alpha",
+                "scenario": "constant",
+                "scenario_id": 1,
+                "seed": 20000,
+                "window": "startup_0_3s",
+                "rmse_3d": 0.1,
+            }]).to_csv(run_dir / "window_metrics.csv", index=False)
+            pd.DataFrame([{
+                "method": "predictive_alpha",
+                "scenario_id": 1,
+                "seed": 20000,
+                "step": 0,
+            }]).to_csv(run_dir / "timeseries" / "timeseries_3d.csv", index=False)
+
+            protocol.write_merged_pac_outputs(
+                root,
+                train_seeds=[20],
+                eval_episode_seeds=[0],
+            )
+
+            self.assertFalse((root / "timeseries" / "timeseries_3d.csv").exists())
 
     def test_formal_eval_episode_rows_are_cartesian_train_seed_and_eval_seed(self):
         from scripts import run_formal_seeded_protocol as protocol
@@ -170,6 +207,9 @@ class FormalSeededProtocolTest(unittest.TestCase):
 
         eval_seed_index = command.index("--eval-seeds") + 1
         self.assertEqual(command[eval_seed_index], "20000,20001")
+        authority_index = command.index("--authority-controller") + 1
+        self.assertEqual(command[authority_index], "real10kg_predictive_event")
+        self.assertEqual(command[1:3], ["-m", "pac.authority.pipeline"])
 
     def test_fixed_controller_command_uses_ten_unique_episodes_once(self):
         from scripts import run_formal_seeded_protocol as protocol
@@ -212,6 +252,24 @@ class FormalSeededProtocolTest(unittest.TestCase):
 
             self.assertFalse(out_dir.exists())
             self.assertFalse(figure_dir.exists())
+
+    def test_nonempty_output_directory_is_rejected(self):
+        from scripts import run_formal_seeded_protocol as protocol
+
+        with tempfile.TemporaryDirectory() as tmp:
+            out_dir = Path(tmp) / "formal"
+            out_dir.mkdir()
+            (out_dir / "existing.txt").write_text("keep", encoding="utf-8")
+
+            with self.assertRaisesRegex(FileExistsError, "output directory is not empty"):
+                protocol.require_empty_output_directory(out_dir)
+
+    def test_parser_accepts_authoritative_config_path(self):
+        from scripts import run_formal_seeded_protocol as protocol
+
+        args = protocol.build_parser().parse_args(["--config", "config/pac.yaml", "--dry-run"])
+
+        self.assertEqual(args.config, "config/pac.yaml")
 
 
 if __name__ == "__main__":

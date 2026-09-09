@@ -67,6 +67,8 @@ def compute_error_window_metrics(
         disturbance_time: float = 30.0,
         disturbance_window: float = 10.0) -> dict[str, float]:
     """Compute post-startup, tail, and disturbance-window tracking metrics."""
+    # The 30 s fields remain only for formal-v2 schema compatibility; current
+    # 21 s episodes therefore retain NaN values in those archived columns.
     if "error" not in df:
         return {
             "post_startup_rmse": float("nan"),

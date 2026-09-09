@@ -1,19 +1,11 @@
-import sys
 import unittest
-from pathlib import Path
 
 import numpy as np
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-CODE_DIR = PROJECT_ROOT / "code"
-if str(CODE_DIR) not in sys.path:
-    sys.path.insert(0, str(CODE_DIR))
-
-
 class SeededEvaluationVariationTest(unittest.TestCase):
     def test_fixed_controller_eval_seed_changes_closed_loop_trajectory(self):
-        from evaluation.current_control import run_fixed_controller_episode
+        from pac.evaluation.episodes import run_fixed_controller_episode
 
         common = {
             "scenario": 2,
@@ -27,7 +19,6 @@ class SeededEvaluationVariationTest(unittest.TestCase):
             "initial_velocity_std": 0.01,
             "vertical_current": 0.75,
             "vehicle_profile": "real_10kg_v1",
-            "action_mode": "thruster",
             "thruster_layout": "real_10kg_x",
             "save_ts": True,
         }

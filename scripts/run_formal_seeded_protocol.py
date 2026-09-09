@@ -17,13 +17,17 @@ from pathlib import Path
 
 import pandas as pd
 
+from pac.config import PACConfig, load_config
+
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_OUT_DIR = ROOT / "results" / "formal_seeded_v2"
-DEFAULT_FIGURE_DIR = ROOT / "results" / "figures" / "formal_seeded_v2"
-DEFAULT_TRAIN_SEEDS = [20, 21, 22, 23, 24]
-DEFAULT_EVAL_EPISODE_SEEDS = list(range(10))
-DEFAULT_SCENARIOS = [1, 2, 3]
+DEFAULT_CONFIG_PATH = ROOT / "config" / "pac.yaml"
+DEFAULT_CONFIG = load_config(DEFAULT_CONFIG_PATH)
+DEFAULT_OUT_DIR = ROOT / DEFAULT_CONFIG.outputs.formal_run_dir
+DEFAULT_FIGURE_DIR = DEFAULT_OUT_DIR / "figures"
+DEFAULT_TRAIN_SEEDS = list(DEFAULT_CONFIG.training.model_seeds)
+DEFAULT_EVAL_EPISODE_SEEDS = list(DEFAULT_CONFIG.evaluation.episode_seeds)
+DEFAULT_SCENARIOS = list(DEFAULT_CONFIG.environment.scenarios)
 PAC_RUN_PREFIX = "pac_train_seed"
 
 
@@ -55,7 +59,8 @@ def build_formal_protocol_manifest(
         eval_episode_seeds: list[int] | None = None,
         scenarios: list[int] | None = None,
         steps: int = 2100,
-        epochs: int = 180) -> dict:
+        epochs: int = 180,
+        config: PACConfig = DEFAULT_CONFIG) -> dict:
     """Return a formal manifest for the seeded evaluation protocol."""
     train_seeds = list(DEFAULT_TRAIN_SEEDS if train_seeds is None else train_seeds)
     eval_episode_seeds = list(
@@ -76,33 +81,33 @@ def build_formal_protocol_manifest(
         "figure_directory": _portable_path(figure_dir),
         "shared_environment": {
             "steps": int(steps),
-            "mass_scale_xy": 1.0,
-            "damping_scale_xy": 1.0,
-            "current_amplitude_scale": 2.5,
-            "current_frequency_scale": 1.0,
-            "eval_initial_position_std": 0.03,
-            "eval_initial_velocity_std": 0.01,
-            "vertical_current": 0.75,
-            "vehicle_profile": "real_10kg_v1",
+            "mass_scale_xy": config.environment.mass_scale_xy,
+            "damping_scale_xy": config.environment.damping_scale_xy,
+            "current_amplitude_scale": config.environment.current_amplitude_scale,
+            "current_frequency_scale": config.environment.current_frequency_scale,
+            "eval_initial_position_std": config.environment.eval_initial_position_std,
+            "eval_initial_velocity_std": config.environment.eval_initial_velocity_std,
+            "vertical_current": config.environment.vertical_current,
+            "vehicle_profile": config.environment.vehicle_profile,
             "action_mode": "thruster",
-            "thruster_layout": "real_10kg_x",
+            "thruster_layout": config.environment.thruster_layout,
         },
         "pac": {
             "policy_architecture": "transformer",
-            "history_len": 16,
-            "transformer_embed_dim": 32,
-            "transformer_heads": 4,
-            "transformer_layers": 1,
-            "model_dropout": 0.1,
+            "history_len": config.authority.history_len,
+            "transformer_embed_dim": config.authority.embed_dim,
+            "transformer_heads": config.authority.heads,
+            "transformer_layers": config.authority.layers,
+            "model_dropout": config.authority.dropout,
             "epochs": int(epochs),
             "teacher_train_scenarios": scenarios,
-            "teacher_train_seeds": [0, 1, 2],
+            "teacher_train_seeds": list(config.training.data_seeds),
             "teacher_mode": "oracle",
-            "primary_controller": "real10kg_smc_steady",
-            "authority_controller": "real10kg_mpc_event",
-            "alpha_gain": 1.2,
-            "alpha_smoothing": 0.5,
-            "alpha_rate_limit": 0.0125,
+            "primary_controller": config.controllers.primary,
+            "authority_controller": config.controllers.authority,
+            "alpha_gain": config.authority.alpha_gain,
+            "alpha_smoothing": config.authority.alpha_smoothing,
+            "alpha_rate_limit": config.authority.alpha_rate_limit,
         },
     }
 
@@ -203,7 +208,9 @@ def build_pac_command(
         steps: int,
         epochs: int,
         no_timeseries: bool = False,
-        progress_every: int = 10) -> list[str]:
+        progress_every: int = 10,
+        config: PACConfig = DEFAULT_CONFIG,
+        config_path: str | Path = DEFAULT_CONFIG_PATH) -> list[str]:
     """Build one PAC training/evaluation command for a single training seed."""
     eval_sim_seeds = [
         row["sim_seed"]
@@ -214,54 +221,48 @@ def build_pac_command(
     ]
     command = [
         sys.executable,
-        "code/evaluation/predictive_3d_authority_alpha.py",
+        "-m", "pac.authority.pipeline",
+        "--config", str(config_path),
         "--out-dir", str(out_dir),
         "--figure-dir", str(figure_dir),
         "--steps", str(int(steps)),
         "--train-scenarios", _csv(scenarios),
-        "--train-seeds", "0,1,2",
+        "--train-seeds", _csv(config.training.data_seeds),
         "--eval-scenarios", _csv(scenarios),
         "--eval-seeds", _csv(eval_sim_seeds),
-        "--mass-scale-xy", "1.0",
-        "--damping-scale-xy", "1.0",
-        "--current-amplitude-scale", "2.5",
-        "--current-frequency-scale", "1.0",
-        "--eval-initial-position-std", "0.03",
-        "--eval-initial-velocity-std", "0.01",
-        "--vertical-current", "0.75",
-        "--vehicle-profile", "real_10kg_v1",
-        "--action-mode", "thruster",
-        "--thruster-layout", "real_10kg_x",
-        "--primary-controller", "real10kg_smc_steady",
-        "--authority-controller", "real10kg_mpc_event",
-        "--teacher-authority-until", "2.0",
-        "--teacher-blend-duration", "0.5",
-        "--teacher-blend-curve", "smoothstep",
+        "--mass-scale-xy", str(config.environment.mass_scale_xy),
+        "--damping-scale-xy", str(config.environment.damping_scale_xy),
+        "--current-amplitude-scale", str(config.environment.current_amplitude_scale),
+        "--current-frequency-scale", str(config.environment.current_frequency_scale),
+        "--eval-initial-position-std", str(config.environment.eval_initial_position_std),
+        "--eval-initial-velocity-std", str(config.environment.eval_initial_velocity_std),
+        "--vertical-current", str(config.environment.vertical_current),
+        "--vehicle-profile", config.environment.vehicle_profile,
+        "--thruster-layout", config.environment.thruster_layout,
+        "--primary-controller", config.controllers.primary,
+        "--authority-controller", config.controllers.authority,
         "--teacher-mode", "oracle",
         "--feature-mode", "state_phase",
-        "--hidden-dim", "64",
         "--policy-architecture", "transformer",
-        "--history-len", "16",
-        "--transformer-embed-dim", "32",
-        "--transformer-heads", "4",
-        "--transformer-layers", "1",
-        "--model-dropout", "0.1",
+        "--history-len", str(config.authority.history_len),
+        "--transformer-embed-dim", str(config.authority.embed_dim),
+        "--transformer-heads", str(config.authority.heads),
+        "--transformer-layers", str(config.authority.layers),
+        "--model-dropout", str(config.authority.dropout),
         "--epochs", str(int(epochs)),
-        "--batch-size", "512",
-        "--lr", "0.001",
+        "--batch-size", str(config.training.batch_size),
+        "--lr", str(config.training.learning_rate),
         "--train-seed", str(int(train_seed)),
-        "--alpha-gain", "1.2",
+        "--alpha-gain", str(config.authority.alpha_gain),
         "--alpha-threshold", "0.0",
-        "--eval-alpha-mode", "model",
-        "--eval-methods", "predictive_alpha",
-        "--oracle-alpha-grid", "0,0.25,0.5,0.75,1",
-        "--oracle-horizon-steps", "10",
-        "--oracle-action-saturation-weight", "0.02",
-        "--oracle-action-delta-weight", "0.01",
-        "--oracle-alpha-delta-weight", "0.0",
-        "--alpha-smoothing", "0.5",
-        "--alpha-rate-limit", "0.0125",
-        "--alpha-deadband", "0.0",
+        "--oracle-alpha-grid", _csv(config.authority.oracle_alpha_grid),
+        "--oracle-horizon-steps", str(config.authority.oracle_horizon_steps),
+        "--oracle-action-saturation-weight", str(config.authority.oracle_action_saturation_weight),
+        "--oracle-action-delta-weight", str(config.authority.oracle_action_delta_weight),
+        "--oracle-alpha-delta-weight", str(config.authority.oracle_alpha_delta_weight),
+        "--alpha-smoothing", str(config.authority.alpha_smoothing),
+        "--alpha-rate-limit", str(config.authority.alpha_rate_limit),
+        "--alpha-deadband", str(config.authority.alpha_deadband),
         "--progress-every", str(int(progress_every)),
     ]
     command.append("--no-save-timeseries" if no_timeseries else "--save-timeseries")
@@ -276,7 +277,8 @@ def build_fixed_controller_command(
         eval_episode_seeds: list[int],
         scenarios: list[int],
         steps: int,
-        no_figures: bool = False) -> list[str]:
+        no_figures: bool = False,
+        config: PACConfig = DEFAULT_CONFIG) -> list[str]:
     """Build the fixed-controller command for one shared set of eval episodes."""
     if not train_seeds:
         raise ValueError("train_seeds must contain a reference seed")
@@ -289,25 +291,24 @@ def build_fixed_controller_command(
     ]
     command = [
         sys.executable,
-        "code/evaluation/diagnose_3d_authority.py",
+        "-m", "pac.evaluation.diagnostics",
         "--mode", "baseline",
         "--out-dir", str(out_dir),
         "--figure-dir", str(figure_dir),
         "--scenarios", _csv(scenarios),
         "--seeds", _csv(sim_seeds),
         "--steps", str(int(steps)),
-        "--mass-scale-xy", "1.0",
-        "--damping-scale-xy", "1.0",
-        "--current-amplitude-scales", "2.5",
-        "--current-frequency-scales", "1.0",
-        "--initial-position-std", "0.03",
-        "--initial-velocity-std", "0.01",
-        "--vertical-current", "0.75",
-        "--vehicle-profile", "real_10kg_v1",
-        "--action-mode", "thruster",
-        "--thruster-layout", "real_10kg_x",
-        "--base-controllers", "real10kg_smc_steady,real10kg_mpc_event",
-        "--reference-controller", "real10kg_smc_steady",
+        "--mass-scale-xy", str(config.environment.mass_scale_xy),
+        "--damping-scale-xy", str(config.environment.damping_scale_xy),
+        "--current-amplitude-scales", str(config.environment.current_amplitude_scale),
+        "--current-frequency-scales", str(config.environment.current_frequency_scale),
+        "--initial-position-std", str(config.environment.eval_initial_position_std),
+        "--initial-velocity-std", str(config.environment.eval_initial_velocity_std),
+        "--vertical-current", str(config.environment.vertical_current),
+        "--vehicle-profile", config.environment.vehicle_profile,
+        "--thruster-layout", config.environment.thruster_layout,
+        "--base-controllers", _csv([config.controllers.primary, config.controllers.authority]),
+        "--reference-controller", config.controllers.primary,
     ]
     if no_figures:
         command.append("--no-figures")
@@ -408,10 +409,8 @@ def write_merged_pac_outputs(
     window_path = root / "window_metrics.csv"
     raw.to_csv(raw_path, index=False)
     window.to_csv(window_path, index=False)
-    if not timeseries.empty:
-        ts_dir = root / "timeseries"
-        ts_dir.mkdir(parents=True, exist_ok=True)
-        timeseries.to_csv(ts_dir / "timeseries_3d.csv", index=False)
+    # Per-seed timeseries are the source artifacts. Do not duplicate them into
+    # a large merged file; callers can use ``merge_pac_seed_outputs`` in memory.
     return raw_path, window_path
 
 
@@ -425,6 +424,13 @@ def run_command(command: list[str], *, dry_run: bool = False) -> None:
     subprocess.run(command, cwd=ROOT, check=True)
 
 
+def require_empty_output_directory(path: Path | str) -> None:
+    """Refuse to overwrite an existing run directory."""
+    target = Path(path)
+    if target.exists() and any(target.iterdir()):
+        raise FileExistsError(f"output directory is not empty: {target}")
+
+
 def run_formal_protocol(args) -> None:
     """Run fixed controllers and PAC training seeds, then merge PAC outputs."""
     out_root = _resolve(args.out_dir)
@@ -432,6 +438,7 @@ def run_formal_protocol(args) -> None:
     train_seeds = _parse_int_csv(args.train_seeds)
     eval_episode_seeds = _parse_int_csv(args.eval_episode_seeds)
     scenarios = _parse_int_csv(args.scenarios)
+    config = getattr(args, "runtime_config", DEFAULT_CONFIG)
     manifest = build_formal_protocol_manifest(
         out_dir=out_root,
         figure_dir=figure_root,
@@ -440,8 +447,10 @@ def run_formal_protocol(args) -> None:
         scenarios=scenarios,
         steps=args.steps,
         epochs=args.epochs,
+        config=config,
     )
     if not args.dry_run:
+        require_empty_output_directory(out_root)
         out_root.mkdir(parents=True, exist_ok=True)
         (out_root / "formal_protocol_manifest.json").write_text(
             json.dumps(manifest, indent=2),
@@ -458,6 +467,7 @@ def run_formal_protocol(args) -> None:
                 scenarios=scenarios,
                 steps=args.steps,
                 no_figures=args.no_figures,
+                config=config,
             ),
             dry_run=args.dry_run,
         )
@@ -480,6 +490,8 @@ def run_formal_protocol(args) -> None:
                     epochs=args.epochs,
                     no_timeseries=args.no_timeseries,
                     progress_every=args.progress_every,
+                    config=config,
+                    config_path=args.config,
                 ),
                 dry_run=args.dry_run,
             )
@@ -497,15 +509,17 @@ def _parse_int_csv(value: str) -> list[int]:
     return [int(item.strip()) for item in str(value).split(",") if item.strip()]
 
 
-def build_parser() -> argparse.ArgumentParser:
+def build_parser(config: PACConfig = DEFAULT_CONFIG) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--out-dir", default=str(DEFAULT_OUT_DIR))
-    parser.add_argument("--figure-dir", default=str(DEFAULT_FIGURE_DIR))
-    parser.add_argument("--train-seeds", default=_csv(DEFAULT_TRAIN_SEEDS))
-    parser.add_argument("--eval-episode-seeds", default=_csv(DEFAULT_EVAL_EPISODE_SEEDS))
-    parser.add_argument("--scenarios", default=_csv(DEFAULT_SCENARIOS))
-    parser.add_argument("--steps", type=int, default=2100)
-    parser.add_argument("--epochs", type=int, default=180)
+    parser.add_argument("--config", default=_portable_path(DEFAULT_CONFIG_PATH))
+    out_dir = ROOT / config.outputs.formal_run_dir
+    parser.add_argument("--out-dir", default=str(out_dir))
+    parser.add_argument("--figure-dir", default=str(out_dir / "figures"))
+    parser.add_argument("--train-seeds", default=_csv(config.training.model_seeds))
+    parser.add_argument("--eval-episode-seeds", default=_csv(config.evaluation.episode_seeds))
+    parser.add_argument("--scenarios", default=_csv(config.environment.scenarios))
+    parser.add_argument("--steps", type=int, default=config.environment.steps)
+    parser.add_argument("--epochs", type=int, default=config.training.epochs)
     parser.add_argument("--progress-every", type=int, default=10)
     parser.add_argument("--no-timeseries", action="store_true")
     parser.add_argument("--no-figures", action="store_true")
@@ -517,7 +531,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv=None) -> int:
-    args = build_parser().parse_args(argv)
+    config_parser = argparse.ArgumentParser(add_help=False)
+    config_parser.add_argument("--config", default=_portable_path(DEFAULT_CONFIG_PATH))
+    known, _unknown = config_parser.parse_known_args(argv)
+    config = load_config(_resolve(known.config))
+    args = build_parser(config).parse_args(argv)
+    args.runtime_config = config
     run_formal_protocol(args)
     return 0
 

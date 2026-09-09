@@ -1,18 +1,49 @@
 import unittest
-import sys
+import io
+import json
+import tempfile
+from contextlib import redirect_stdout
 from pathlib import Path
 
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
-CODE_DIR = ROOT / "code"
-if str(CODE_DIR) not in sys.path:
-    sys.path.insert(0, str(CODE_DIR))
 
 
 class SSPOAlphaCalibrationTest(unittest.TestCase):
+    def test_dry_run_reports_archived_search_configuration_without_writing(self):
+        from scripts import sspo_alpha_calibration as sspo
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            out_dir = Path(temp_dir) / "sspo"
+            with redirect_stdout(io.StringIO()) as output:
+                status = sspo.main([
+                    "--config",
+                    str(ROOT / "config" / "pac.yaml"),
+                    "--out-dir",
+                    str(out_dir),
+                    "--dry-run",
+                ])
+            manifest = json.loads(output.getvalue())
+
+        self.assertEqual(status, 0)
+        self.assertFalse(out_dir.exists())
+        self.assertEqual(manifest["bias_grid"], [-0.05, 0.0, 0.1, 0.2, 0.3])
+        self.assertEqual(manifest["window_regret_weight"], 0.02)
+        self.assertEqual(manifest["search_eval_overlap_seeds"], [20000, 20001, 20002])
+
+    def test_nonempty_output_directory_is_rejected(self):
+        from scripts import sspo_alpha_calibration as sspo
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output = Path(temp_dir) / "sspo"
+            output.mkdir()
+            (output / "existing.txt").write_text("keep", encoding="utf-8")
+            with self.assertRaisesRegex(FileExistsError, "output directory is not empty"):
+                sspo.require_empty_output_directory(output)
+
     def test_alpha_bias_schedule_is_added_by_evaluation_window_and_clipped(self):
-        from evaluation import predictive_3d_authority_alpha as pac
+        from pac.authority import evaluation as pac
 
         schedule = {
             "startup_0_3s": 0.20,

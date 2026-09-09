@@ -3,45 +3,12 @@
 from __future__ import annotations
 
 import csv
-import hashlib
 from pathlib import Path
+
+from pac.repository import file_sha256, repository_files
 
 
 ROOT = Path(__file__).resolve().parents[1]
-GENERATED_NAMES = {
-    "MANIFEST.csv",
-    "SHA256SUMS.txt",
-    "REPOSITORY_VERIFICATION.json",
-    "REPOSITORY_VERIFICATION_CHECKS.csv",
-}
-RUNTIME_DIRS = {".git", ".venv", "__" + "pycache__", ".pytest_cache", "dist"}
-RUNTIME_SUFFIXES = {".pyc", ".tmp", ".log", ".lock"}
-
-
-def repository_files(root: Path = ROOT) -> list[Path]:
-    """Return every tracked payload file, excluding local runtime artifacts."""
-    root = Path(root)
-    files = []
-    for path in root.rglob("*"):
-        if not path.is_file() or path.name in GENERATED_NAMES:
-            continue
-        relative = path.relative_to(root)
-        if any(part in RUNTIME_DIRS for part in relative.parts):
-            continue
-        if path.suffix.lower() in RUNTIME_SUFFIXES:
-            continue
-        files.append(path)
-    return sorted(files, key=lambda path: path.relative_to(root).as_posix().lower())
-
-
-def file_sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
 def build_rows(root: Path = ROOT) -> list[dict[str, str]]:
     rows = []
     for path in repository_files(root):
@@ -63,6 +30,7 @@ def write_manifests(root: Path = ROOT) -> tuple[Path, Path, int]:
         writer = csv.DictWriter(
             handle,
             fieldnames=["path", "bytes", "sha256"],
+            lineterminator="\n",
         )
         writer.writeheader()
         writer.writerows(rows)

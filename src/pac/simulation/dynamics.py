@@ -62,6 +62,9 @@ class AUVDynamics:
 
     def _C(self, nu):
         """Simplified Coriolis matrix for the diagonal effective mass model."""
+        # Formal-v2 compatibility: this archived coupling is intentionally kept
+        # in the numerical path. It is not fully skew-symmetric; correcting it
+        # requires new checkpoints, metrics, and figures.
         m11, m22, m33 = self.M[0, 0], self.M[1, 1], self.M[2, 2]
         m44, m55, m66 = self.M[3, 3], self.M[4, 4], self.M[5, 5]
         u, v, w, p, q, r = nu

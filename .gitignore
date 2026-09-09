@@ -8,3 +8,7 @@ __pycache__/
 REPOSITORY_VERIFICATION.json
 REPOSITORY_VERIFICATION_CHECKS.csv
 dist/
+paper/
+runs/
+build/
+*.egg-info/

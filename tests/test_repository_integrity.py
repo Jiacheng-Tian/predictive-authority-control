@@ -20,6 +20,9 @@ def sha256(path: Path) -> str:
 
 
 class RepositoryIntegrityTest(unittest.TestCase):
+    def test_manifest_uses_lf_line_endings(self):
+        self.assertNotIn(b"\r\n", (ROOT / "MANIFEST.csv").read_bytes())
+
     def test_manifest_uses_only_clone_stable_fields(self):
         with (ROOT / "MANIFEST.csv").open("r", encoding="utf-8-sig", newline="") as handle:
             reader = csv.DictReader(handle)
@@ -68,6 +71,11 @@ class RepositoryIntegrityTest(unittest.TestCase):
         self.assertEqual(set(fixed_counts.values()), {10})
         self.assertEqual(len(fixed_counts), 6)
         self.assertEqual(len(list((ROOT / "results/formal_seeded_v2").glob("pac_train_seed_*/predictive_alpha_model.pt"))), 5)
+
+    def test_derived_merged_timeseries_is_not_stored(self):
+        self.assertFalse(
+            (ROOT / "results/formal_seeded_v2/timeseries/timeseries_3d.csv").exists()
+        )
 
 
 if __name__ == "__main__":

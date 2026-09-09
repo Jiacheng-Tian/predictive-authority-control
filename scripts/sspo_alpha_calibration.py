@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 import time
 from pathlib import Path
 
@@ -16,29 +15,27 @@ import numpy as np
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
-CODE_DIR = ROOT / "code"
-if str(CODE_DIR) not in sys.path:
-    sys.path.insert(0, str(CODE_DIR))
 
-from evaluation.diagnose_3d_authority import (
+from pac.config import PACConfig, load_config
+from pac.evaluation.diagnostics import (
     DEFAULT_WINDOWS,
     SCENARIO_NAMES,
     compute_axis_window_metrics,
 )
-from evaluation.predictive_3d_authority_alpha import (
-    _scalar_metrics,
-    load_alpha_model_checkpoint,
-    run_predictive_alpha_episode,
-)
+from pac.authority.evaluation import run_predictive_alpha_episode, scalar_metrics
+from pac.authority.model import load_alpha_model_checkpoint
 
 
-DEFAULT_OUT_DIR = ROOT / "results" / "3d_authority_diagnosis" / "sspo_alpha_calibration_seed20_v1"
-DEFAULT_MODEL = ROOT / "results" / "formal_seeded_v2" / "pac_train_seed_20" / "predictive_alpha_model.pt"
-DEFAULT_FIXED_DIR = ROOT / "results" / "formal_seeded_v2" / "fixed_controllers"
-DEFAULT_PAC_DIR = ROOT / "results" / "formal_seeded_v2" / "pac_train_seed_20"
-DEFAULT_SCENARIOS = [1, 2, 3]
-DEFAULT_SEARCH_SEEDS = [20000]
-DEFAULT_EVAL_SEEDS = [20000 + idx for idx in range(10)]
+DEFAULT_CONFIG_PATH = ROOT / "config" / "pac.yaml"
+DEFAULT_CONFIG = load_config(DEFAULT_CONFIG_PATH)
+DEFAULT_OUT_DIR = ROOT / DEFAULT_CONFIG.outputs.sspo_run_dir
+DEFAULT_EVIDENCE_DIR = ROOT / DEFAULT_CONFIG.outputs.formal_evidence_dir
+DEFAULT_MODEL = DEFAULT_EVIDENCE_DIR / "pac_train_seed_20" / "predictive_alpha_model.pt"
+DEFAULT_FIXED_DIR = DEFAULT_EVIDENCE_DIR / "fixed_controllers"
+DEFAULT_PAC_DIR = DEFAULT_EVIDENCE_DIR / "pac_train_seed_20"
+DEFAULT_SCENARIOS = list(DEFAULT_CONFIG.sspo.search_scenarios)
+DEFAULT_SEARCH_SEEDS = list(DEFAULT_CONFIG.sspo.search_seeds)
+DEFAULT_EVAL_SEEDS = list(DEFAULT_CONFIG.sspo.eval_seeds)
 DEFAULT_WINDOW_NAMES = [name for name, _start, _end in DEFAULT_WINDOWS]
 
 
@@ -47,6 +44,20 @@ def resolve_path(path: str | Path) -> Path:
     if path.is_absolute():
         return path
     return ROOT / path
+
+
+def portable_path(path: str | Path) -> str:
+    resolved = resolve_path(path).resolve()
+    try:
+        return resolved.relative_to(ROOT.resolve()).as_posix()
+    except ValueError:
+        return resolved.as_posix()
+
+
+def require_empty_output_directory(path: str | Path) -> None:
+    target = resolve_path(path)
+    if target.exists() and any(target.iterdir()):
+        raise FileExistsError(f"output directory is not empty: {target}")
 
 
 def parse_csv_ints(value: str) -> list[int]:
@@ -195,23 +206,15 @@ def evaluate_bias_schedule(
                 feature_mode=str(model_meta["feature_mode"]),
                 initial_position_std=float(args.eval_initial_position_std),
                 initial_velocity_std=float(args.eval_initial_velocity_std),
-                start_time=float(args.start_time),
                 alpha_bias_schedule=schedule,
                 alpha_gain=float(args.alpha_gain),
-                alpha_threshold=float(args.alpha_threshold),
-                alpha_mode="model",
                 vehicle_profile=str(args.vehicle_profile),
-                action_mode=str(args.action_mode),
                 thruster_layout=str(args.thruster_layout),
                 alpha_smoothing=float(args.alpha_smoothing),
                 alpha_rate_limit=float(args.alpha_rate_limit),
                 alpha_deadband=float(args.alpha_deadband),
                 policy_architecture=str(model_meta["policy_architecture"]),
                 history_len=int(model_meta["history_len"]),
-                uncertainty_mode=str(args.uncertainty_mode),
-                uncertainty_samples=int(args.uncertainty_samples),
-                uncertainty_gain=float(args.uncertainty_gain),
-                uncertainty_threshold=float(args.uncertainty_threshold),
                 save_ts=True,
             )
             row = {
@@ -219,12 +222,12 @@ def evaluate_bias_schedule(
                 "scenario": SCENARIO_NAMES.get(int(scenario), str(scenario)),
                 "scenario_id": int(scenario),
                 "seed": int(seed),
-                "start_time": float(args.start_time),
+                "start_time": 0.0,
                 "mass_scale_xy": float(args.mass_scale_xy),
                 "damping_scale_xy": float(args.damping_scale_xy),
                 "initial_position_std": float(args.eval_initial_position_std),
                 "initial_velocity_std": float(args.eval_initial_velocity_std),
-                **_scalar_metrics(metrics),
+                **scalar_metrics(metrics),
             }
             rows.append(row)
             ts = metrics["ts"].copy()
@@ -232,7 +235,7 @@ def evaluate_bias_schedule(
             ts["scenario"] = row["scenario"]
             ts["scenario_id"] = int(scenario)
             ts["seed"] = int(seed)
-            ts["start_time"] = float(args.start_time)
+            ts["start_time"] = 0.0
             ts["current_amplitude_scale"] = float(args.current_amplitude_scale)
             ts["current_frequency_scale"] = float(args.current_frequency_scale)
             ts["initial_position_std"] = float(args.eval_initial_position_std)
@@ -407,6 +410,7 @@ def build_window_regret_table(
 def run_sspo(args) -> dict:
     out_dir = resolve_path(args.out_dir)
     ts_dir = out_dir / "timeseries"
+    require_empty_output_directory(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     ts_dir.mkdir(parents=True, exist_ok=True)
 
@@ -480,6 +484,16 @@ def run_sspo(args) -> dict:
         "search_seeds": search_seeds,
         "eval_seeds": eval_seeds,
         "eval_scenarios": eval_scenarios,
+        "search_eval_overlap_seeds": sorted(set(search_seeds) & set(eval_seeds)),
+        "search_configuration": {
+            "search_windows": [name.strip() for name in str(args.search_windows).split(",") if name.strip()],
+            "bias_grid": parse_bias_grid(args.bias_grid),
+            "iterations": int(args.iterations),
+            "window_regret_weight": float(args.window_regret_weight),
+            "rmse_guard_weight": float(args.rmse_guard_weight),
+            "saturation_weight": float(args.saturation_weight),
+            "jerk_weight": float(args.jerk_weight),
+        },
         "formal_pac_rmse": float(pac_eval_raw["rmse"].mean()),
         "sspo_rmse": float(raw["rmse"].mean()),
         "rmse_gain_vs_formal_pac_pct": float(
@@ -488,13 +502,13 @@ def run_sspo(args) -> dict:
         "formal_positive_window_regret": mean_positive_window_regret(pac_eval_window, fixed_eval),
         "sspo_positive_window_regret": mean_positive_window_regret(window, fixed_eval),
         "outputs": {
-            "search_log": str(out_dir / "sspo_bias_search.csv"),
-            "best_bias_schedule": str(out_dir / "best_bias_schedule.json"),
-            "raw_metrics": str(out_dir / "raw_metrics.csv"),
-            "window_metrics": str(out_dir / "window_metrics.csv"),
-            "timeseries": str(ts_dir / "timeseries_3d.csv"),
-            "overall_comparison": str(out_dir / "sspo_vs_formal_pac_overall.csv"),
-            "window_regret": str(out_dir / "sspo_window_regret_summary.csv"),
+            "search_log": portable_path(out_dir / "sspo_bias_search.csv"),
+            "best_bias_schedule": portable_path(out_dir / "best_bias_schedule.json"),
+            "raw_metrics": portable_path(out_dir / "raw_metrics.csv"),
+            "window_metrics": portable_path(out_dir / "window_metrics.csv"),
+            "timeseries": portable_path(ts_dir / "timeseries_3d.csv"),
+            "overall_comparison": portable_path(out_dir / "sspo_vs_formal_pac_overall.csv"),
+            "window_regret": portable_path(out_dir / "sspo_window_regret_summary.csv"),
         },
     }
     (out_dir / "sspo_summary.json").write_text(
@@ -504,53 +518,75 @@ def run_sspo(args) -> dict:
     return summary
 
 
-def build_parser() -> argparse.ArgumentParser:
+def dry_run_manifest(args) -> dict:
+    search_seeds = parse_csv_ints(args.search_seeds)
+    eval_seeds = parse_csv_ints(args.eval_seeds)
+    return {
+        "out_dir": str(args.out_dir),
+        "search_scenarios": parse_csv_ints(args.search_scenarios),
+        "eval_scenarios": parse_csv_ints(args.eval_scenarios),
+        "search_seeds": search_seeds,
+        "eval_seeds": eval_seeds,
+        "search_eval_overlap_seeds": sorted(set(search_seeds) & set(eval_seeds)),
+        "search_windows": [item.strip() for item in args.search_windows.split(",") if item.strip()],
+        "bias_grid": parse_bias_grid(args.bias_grid),
+        "iterations": int(args.iterations),
+        "window_regret_weight": float(args.window_regret_weight),
+        "rmse_guard_weight": float(args.rmse_guard_weight),
+        "saturation_weight": float(args.saturation_weight),
+        "jerk_weight": float(args.jerk_weight),
+    }
+
+
+def build_parser(config: PACConfig = DEFAULT_CONFIG) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--out-dir", default=str(DEFAULT_OUT_DIR))
+    parser.add_argument("--config", default=str(DEFAULT_CONFIG_PATH))
+    parser.add_argument("--out-dir", default=str(ROOT / config.outputs.sspo_run_dir))
     parser.add_argument("--pretrained-alpha-model", default=str(DEFAULT_MODEL))
     parser.add_argument("--fixed-dir", default=str(DEFAULT_FIXED_DIR))
     parser.add_argument("--pac-dir", default=str(DEFAULT_PAC_DIR))
-    parser.add_argument("--search-scenarios", default=",".join(str(item) for item in DEFAULT_SCENARIOS))
-    parser.add_argument("--eval-scenarios", default=",".join(str(item) for item in DEFAULT_SCENARIOS))
-    parser.add_argument("--search-seeds", default=",".join(str(seed) for seed in DEFAULT_SEARCH_SEEDS))
-    parser.add_argument("--eval-seeds", default=",".join(str(seed) for seed in DEFAULT_EVAL_SEEDS))
-    parser.add_argument("--search-windows", default=",".join(DEFAULT_WINDOW_NAMES))
-    parser.add_argument("--bias-grid", default="-0.15,0,0.15,0.30")
-    parser.add_argument("--iterations", type=int, default=1)
-    parser.add_argument("--window-regret-weight", type=float, default=0.01)
-    parser.add_argument("--rmse-guard-weight", type=float, default=5.0)
-    parser.add_argument("--saturation-weight", type=float, default=0.0)
-    parser.add_argument("--jerk-weight", type=float, default=0.0)
-    parser.add_argument("--steps", type=int, default=2100)
-    parser.add_argument("--mass-scale-xy", type=float, default=1.0)
-    parser.add_argument("--damping-scale-xy", type=float, default=1.0)
-    parser.add_argument("--start-time", type=float, default=0.0)
-    parser.add_argument("--current-amplitude-scale", type=float, default=2.5)
-    parser.add_argument("--current-frequency-scale", type=float, default=1.0)
-    parser.add_argument("--eval-initial-position-std", type=float, default=0.03)
-    parser.add_argument("--eval-initial-velocity-std", type=float, default=0.01)
-    parser.add_argument("--vertical-current", type=float, default=0.75)
-    parser.add_argument("--vehicle-profile", default="real_10kg_v1")
-    parser.add_argument("--action-mode", default="thruster")
-    parser.add_argument("--thruster-layout", default="real_10kg_x")
-    parser.add_argument("--primary-controller", default="real10kg_smc_steady")
-    parser.add_argument("--authority-controller", default="real10kg_mpc_event")
-    parser.add_argument("--feature-mode", default="state_phase")
-    parser.add_argument("--alpha-gain", type=float, default=1.2)
-    parser.add_argument("--alpha-threshold", type=float, default=0.0)
-    parser.add_argument("--alpha-smoothing", type=float, default=0.5)
-    parser.add_argument("--alpha-rate-limit", type=float, default=0.0125)
-    parser.add_argument("--alpha-deadband", type=float, default=0.0)
-    parser.add_argument("--uncertainty-mode", default="none")
-    parser.add_argument("--uncertainty-samples", type=int, default=1)
-    parser.add_argument("--uncertainty-gain", type=float, default=0.0)
-    parser.add_argument("--uncertainty-threshold", type=float, default=1.0)
+    parser.add_argument("--search-scenarios", default=",".join(str(item) for item in config.sspo.search_scenarios))
+    parser.add_argument("--eval-scenarios", default=",".join(str(item) for item in config.sspo.eval_scenarios))
+    parser.add_argument("--search-seeds", default=",".join(str(seed) for seed in config.sspo.search_seeds))
+    parser.add_argument("--eval-seeds", default=",".join(str(seed) for seed in config.sspo.eval_seeds))
+    parser.add_argument("--search-windows", default=",".join(config.sspo.search_windows))
+    parser.add_argument("--bias-grid", default=",".join(str(item) for item in config.sspo.bias_grid))
+    parser.add_argument("--iterations", type=int, default=config.sspo.iterations)
+    parser.add_argument("--window-regret-weight", type=float, default=config.sspo.window_regret_weight)
+    parser.add_argument("--rmse-guard-weight", type=float, default=config.sspo.rmse_guard_weight)
+    parser.add_argument("--saturation-weight", type=float, default=config.sspo.saturation_weight)
+    parser.add_argument("--jerk-weight", type=float, default=config.sspo.jerk_weight)
+    parser.add_argument("--steps", type=int, default=config.environment.steps)
+    parser.add_argument("--mass-scale-xy", type=float, default=config.environment.mass_scale_xy)
+    parser.add_argument("--damping-scale-xy", type=float, default=config.environment.damping_scale_xy)
+    parser.add_argument("--current-amplitude-scale", type=float, default=config.environment.current_amplitude_scale)
+    parser.add_argument("--current-frequency-scale", type=float, default=config.environment.current_frequency_scale)
+    parser.add_argument("--eval-initial-position-std", type=float, default=config.environment.eval_initial_position_std)
+    parser.add_argument("--eval-initial-velocity-std", type=float, default=config.environment.eval_initial_velocity_std)
+    parser.add_argument("--vertical-current", type=float, default=config.environment.vertical_current)
+    parser.add_argument("--vehicle-profile", default=config.environment.vehicle_profile)
+    parser.add_argument("--thruster-layout", default=config.environment.thruster_layout)
+    parser.add_argument("--primary-controller", default=config.controllers.primary)
+    parser.add_argument("--authority-controller", default=config.controllers.authority)
+    parser.add_argument("--feature-mode", default=config.authority.feature_mode)
+    parser.add_argument("--alpha-gain", type=float, default=config.authority.alpha_gain)
+    parser.add_argument("--alpha-smoothing", type=float, default=config.authority.alpha_smoothing)
+    parser.add_argument("--alpha-rate-limit", type=float, default=config.authority.alpha_rate_limit)
+    parser.add_argument("--alpha-deadband", type=float, default=config.authority.alpha_deadband)
     parser.add_argument("--progress-every", type=int, default=5)
+    parser.add_argument("--dry-run", action="store_true")
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    config_parser = argparse.ArgumentParser(add_help=False)
+    config_parser.add_argument("--config", default=str(DEFAULT_CONFIG_PATH))
+    known, _unknown = config_parser.parse_known_args(argv)
+    config = load_config(resolve_path(known.config))
+    args = build_parser(config).parse_args(argv)
+    if args.dry_run:
+        print(json.dumps(dry_run_manifest(args), indent=2, sort_keys=True))
+        return 0
     summary = run_sspo(args)
     print(json.dumps(summary, indent=2, sort_keys=True))
     return 0

@@ -1,37 +1,28 @@
 """Current-version fixed-controller evaluation helpers."""
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
 import numpy as np
 import pandas as pd
 
-CODE_DIR = Path(__file__).resolve().parents[1]
-if str(CODE_DIR) not in sys.path:
-    sys.path.insert(0, str(CODE_DIR))
-
-from env.auv_env import AUVTrackingEnv
-from evaluation.baseline_presets import (
-    build_real10kg_mpc_3d,
-    build_real10kg_mpc_event,
-    build_real10kg_smc,
+from pac.simulation.core import AUVSimulator
+from pac.controllers.presets import (
+    build_real10kg_predictive_event,
     build_real10kg_smc_steady,
 )
-from evaluation.engineering_metrics import compute_timeseries_engineering_metrics
+from pac.evaluation.metrics import compute_timeseries_engineering_metrics
 
 SCENARIO_NAMES = {1: "constant", 2: "sinusoidal", 3: "step_change"}
 
 
-def _wrap_angle(angle: float) -> float:
+def wrap_angle(angle: float) -> float:
     return float((float(angle) + np.pi) % (2.0 * np.pi) - np.pi)
 
 
-def _desired_heading(t: float) -> float:
+def desired_heading(t: float) -> float:
     return float(np.arctan2(0.9 * np.cos(0.6 * float(t)), 0.9 * np.cos(0.3 * float(t))))
 
 
-def _compute_metrics(errors, energies, actions, headings, desired_headings, dt, z_errors=None) -> dict:
+def compute_episode_metrics(errors, energies, actions, headings, desired_headings, dt, z_errors=None) -> dict:
     errors = np.asarray(errors, dtype=float)
     energies = np.asarray(energies, dtype=float)
     actions = np.asarray(actions, dtype=float)
@@ -39,7 +30,7 @@ def _compute_metrics(errors, energies, actions, headings, desired_headings, dt, 
     desired = np.asarray(desired_headings, dtype=float) if len(desired_headings) else np.zeros_like(errors)
     n = max(int(len(errors)), 1)
     steady_start = int(n * 0.8)
-    heading_error = np.asarray([_wrap_angle(h - d) for h, d in zip(headings, desired)], dtype=float)
+    heading_error = np.asarray([wrap_angle(h - d) for h, d in zip(headings, desired)], dtype=float)
     metrics = {
         "final_error": float(errors[-1]) if len(errors) else float("inf"),
         "success_0.5m": float(errors[-1] < 0.5) if len(errors) else 0.0,
@@ -65,7 +56,7 @@ def _compute_metrics(errors, energies, actions, headings, desired_headings, dt, 
     return metrics
 
 
-def _make_ts(
+def make_timeseries(
         steps,
         errors,
         energies,
@@ -105,25 +96,25 @@ def _make_ts(
     return out
 
 
-def _build_base_controller(name: str):
+def build_controller(name: str):
     controller_name = str(name or "real10kg_smc_steady").strip().lower()
-    if controller_name in {"real10kg_smc", "smc"}:
-        return "real10kg_smc", build_real10kg_smc()
-    if controller_name in {"real10kg_smc_steady", "real10kg_steady_smc"}:
+    if controller_name == "real10kg_smc_steady":
         return "real10kg_smc_steady", build_real10kg_smc_steady()
-    if controller_name in {"real10kg_mpc_3d", "real10kg_mpc"}:
-        return "real10kg_mpc_3d", build_real10kg_mpc_3d()
-    if controller_name in {"real10kg_mpc_event", "real10kg_event_mpc", "mpc"}:
-        return "real10kg_mpc_event", build_real10kg_mpc_event()
+    if controller_name == "real10kg_predictive_event":
+        return "real10kg_mpc_event", build_real10kg_predictive_event()
     raise ValueError(f"Unknown current-version controller: {controller_name}")
 
 
-def _compute_base_action(controller, controller_name, target, eta, nu, t, dt, current):
+def compute_controller_action(controller, controller_name, target, eta, nu, t, dt, current):
     del controller_name
-    try:
-        return controller.compute(target, eta, nu, t=t, dt=dt, current_prediction=current)
-    except TypeError:
-        return controller.compute(target, eta, nu, t=t, dt=dt)
+    del dt
+    return controller.compute(
+        target,
+        eta,
+        nu,
+        t=t,
+        current_prediction=current,
+    )
 
 
 def run_fixed_controller_episode(
@@ -134,40 +125,32 @@ def run_fixed_controller_episode(
         mass_scale_xy: float,
         damping_scale_xy: float,
         base_controller: str,
-        start_time: float = 0.0,
-        trajectory3d: bool = True,
         current_amplitude_scale: float = 1.0,
         current_frequency_scale: float = 1.0,
         initial_position_std: float = 0.0,
         initial_velocity_std: float = 0.0,
         vertical_current: float = 0.0,
         vehicle_profile: str = "real_10kg_v1",
-        action_mode: str = "thruster",
         thruster_layout: str = "real_10kg_x",
         save_ts: bool = False) -> dict:
-    env = AUVTrackingEnv(
+    env = AUVSimulator(
         scenario=int(scenario),
         max_steps=int(steps),
-        trajectory3d=bool(trajectory3d),
         mass_scale_xy=float(mass_scale_xy),
         damping_scale_xy=float(damping_scale_xy),
-        start_time=float(start_time),
         current_amplitude_scale=float(current_amplitude_scale),
         current_frequency_scale=float(current_frequency_scale),
         initial_position_std=float(initial_position_std),
         initial_velocity_std=float(initial_velocity_std),
         vertical_current=float(vertical_current),
         vehicle_profile=str(vehicle_profile),
-        action_mode=str(action_mode),
         thruster_layout=str(thruster_layout),
     )
-    canonical_name, controller = _build_base_controller(base_controller)
-    obs, _ = env.reset(seed=int(seed))
-    del obs
+    canonical_name, controller = build_controller(base_controller)
+    env.reset(seed=int(seed))
     if hasattr(controller, "reset"):
         controller.reset()
-    if hasattr(controller, "set_trajectory3d"):
-        controller.set_trajectory3d(bool(trajectory3d))
+    controller.set_trajectory3d(True)
     errors, energies, actions = [], [], []
     headings, desired_headings, xs, ys, step_rows = [], [], [], [], []
     rolls, pitches, desired_rolls, desired_pitches = [], [], [], []
@@ -175,45 +158,42 @@ def run_fixed_controller_episode(
     done = False
     while not done:
         dyn = env.dynamics
-        t = env.start_time + env.current_step * dyn.dt
+        t = env.current_step * dyn.dt
         target = env._get_target(t)
-        action = _compute_base_action(controller, canonical_name, target, dyn.eta, dyn.nu, t, dyn.dt, env.privileged_state[:3])
+        action = compute_controller_action(controller, canonical_name, target, dyn.eta, dyn.nu, t, dyn.dt, env.privileged_state[:3])
         step_rows.append(int(env.current_step))
         rolls.append(float(dyn.eta[3]))
         pitches.append(float(dyn.eta[4]))
         headings.append(float(dyn.eta[5]))
         desired_rolls.append(float(target[3]))
         desired_pitches.append(float(target[4]))
-        desired_headings.append(float(_desired_heading(t)))
+        desired_headings.append(float(desired_heading(t)))
         xs.append(float(dyn.eta[0]))
         ys.append(float(dyn.eta[1]))
-        if trajectory3d:
-            zs.append(float(dyn.eta[2]))
-            target_zs.append(float(target[2]))
-        _next_obs, _reward, terminated, truncated, info = env.step(action)
-        done = bool(terminated or truncated)
+        zs.append(float(dyn.eta[2]))
+        target_zs.append(float(target[2]))
+        done, info = env.step(action)
         errors.append(float(info["dist_error"]))
         energies.append(float(info["energy"]))
-        if trajectory3d:
-            z_errors.append(float(info.get("z_error", target[2] - dyn.eta[2])))
+        z_errors.append(float(info.get("z_error", target[2] - dyn.eta[2])))
         actions.append(np.asarray(action, dtype=float).copy())
         if "thruster_forces" in info:
             thruster_forces.append(np.asarray(info["thruster_forces"], dtype=float))
-    metrics = _compute_metrics(errors, energies, actions, headings, desired_headings, env.dynamics.dt, z_errors=z_errors if trajectory3d else None)
+    metrics = compute_episode_metrics(errors, energies, actions, headings, desired_headings, env.dynamics.dt, z_errors=z_errors)
     metrics.update({
         "base_controller": canonical_name,
-        "start_time": float(start_time),
-        "trajectory3d": bool(trajectory3d),
+        "start_time": 0.0,
+        "trajectory3d": True,
         "current_amplitude_scale": float(current_amplitude_scale),
         "current_frequency_scale": float(current_frequency_scale),
         "initial_position_std": float(initial_position_std),
         "initial_velocity_std": float(initial_velocity_std),
         "vertical_current": float(vertical_current),
         "vehicle_profile": str(vehicle_profile),
-        "action_mode": str(action_mode),
+        "action_mode": "thruster",
         "thruster_layout": str(thruster_layout),
     })
-    ts = pd.DataFrame(_make_ts(
+    ts = pd.DataFrame(make_timeseries(
         step_rows,
         errors,
         energies,
@@ -226,16 +206,16 @@ def run_fixed_controller_episode(
         pitches=pitches,
         desired_rolls=desired_rolls,
         desired_pitches=desired_pitches,
-        zs=zs if trajectory3d else None,
-        target_zs=target_zs if trajectory3d else None,
-        z_errors=z_errors if trajectory3d else None,
+        zs=zs,
+        target_zs=target_zs,
+        z_errors=z_errors,
     ))
     if thruster_forces:
         force_array = np.asarray(thruster_forces, dtype=float)
         for idx in range(force_array.shape[1]):
             ts[f"thruster_force_{idx}"] = force_array[:, idx]
     ts["vehicle_profile"] = str(vehicle_profile)
-    ts["action_mode"] = str(action_mode)
+    ts["action_mode"] = "thruster"
     ts["thruster_layout"] = str(thruster_layout)
     ts["initial_position_std"] = float(initial_position_std)
     ts["initial_velocity_std"] = float(initial_velocity_std)

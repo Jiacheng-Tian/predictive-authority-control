@@ -50,6 +50,7 @@ class ThrusterLayout:
 
 
 def build_real_10kg_x_layout() -> ThrusterLayout:
+    """Build the rank-5 layout; pitch remains passively stabilized."""
     lx = 0.20
     ly = 0.175
     ly_vertical = 0.15
