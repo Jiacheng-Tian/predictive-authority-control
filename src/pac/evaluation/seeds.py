@@ -5,6 +5,9 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 
 
+_MAX_SEED = 2**64 - 1
+
+
 def validate_disjoint_seed_partitions(
     partitions: Mapping[str, Sequence[int]],
 ) -> None:
@@ -17,6 +20,8 @@ def validate_disjoint_seed_partitions(
                 raise ValueError(f"seed in role {role} must be an integer: {seed!r}")
             if seed < 0:
                 raise ValueError(f"negative seed in role {role}: {seed}")
+            if seed > _MAX_SEED:
+                raise ValueError(f"seed in role {role} exceeds uint64 maximum: {seed}")
             if seed in role_seen:
                 raise ValueError(f"duplicate seed in role {role}: {seed}")
             role_seen.add(seed)

@@ -129,6 +129,88 @@ class V3ExperimentConfigTest(unittest.TestCase):
                     with self.assertRaisesRegex(ValueError, rf"{role}.*-1"):
                         load_v3_config(path)
 
+    def test_every_seed_role_enforces_uint64_bounds(self):
+        from pac.experiment_config import load_v3_config
+
+        seed_fields = {
+            ("training", "oracle_train_seeds"): "oracle_train",
+            ("training", "oracle_val_seeds"): "oracle_val",
+            ("training", "model_seeds"): "model",
+            ("evaluation", "episode_seeds"): "evaluation",
+            ("sspo", "search_seeds"): "sspo_search",
+            ("sspo", "eval_seeds"): "sspo_eval",
+            ("robustness", "eval_seeds"): "robustness_eval",
+        }
+        max_seed = 2**64 - 1
+        for (section, field), role in seed_fields.items():
+            too_large = yaml.safe_load(V3_PATH.read_text(encoding="utf-8"))
+            too_large[section][field] = [2**64]
+            accepted = yaml.safe_load(V3_PATH.read_text(encoding="utf-8"))
+            accepted[section][field] = [max_seed]
+            with self.subTest(role=role, case="too_large"):
+                with tempfile.TemporaryDirectory() as temp_dir:
+                    path = Path(temp_dir) / "invalid.yaml"
+                    path.write_text(yaml.safe_dump(too_large), encoding="utf-8")
+                    with self.assertRaisesRegex(ValueError, rf"{role}.*18446744073709551616"):
+                        load_v3_config(path)
+            with self.subTest(role=role, case="max"):
+                with tempfile.TemporaryDirectory() as temp_dir:
+                    path = Path(temp_dir) / "valid.yaml"
+                    path.write_text(yaml.safe_dump(accepted), encoding="utf-8")
+                    config = load_v3_config(path)
+                    section_config = {
+                        "oracle_train_seeds": config.training.oracle_train_seeds,
+                        "oracle_val_seeds": config.training.oracle_val_seeds,
+                        "model_seeds": config.training.model_seeds,
+                        "episode_seeds": config.evaluation.episode_seeds,
+                        "search_seeds": config.sspo.search_seeds,
+                        "eval_seeds": (
+                            config.sspo.eval_seeds
+                            if section == "sspo"
+                            else config.robustness.eval_seeds
+                        ),
+                    }[field]
+                    self.assertEqual(section_config, (max_seed,))
+
+    def test_environment_scale_and_initial_std_bounds(self):
+        from pac.experiment_config import load_v3_config
+
+        invalid_fields = {
+            "mass_scale_xy": 0.0,
+            "damping_scale_xy": -0.1,
+            "current_frequency_scale": 0.0,
+            "current_amplitude_scale": -0.1,
+            "eval_initial_position_std": -0.1,
+            "eval_initial_velocity_std": -0.1,
+        }
+        for field, invalid in invalid_fields.items():
+            source = yaml.safe_load(V3_PATH.read_text(encoding="utf-8"))
+            source["environment"][field] = invalid
+            with self.subTest(field=field):
+                with tempfile.TemporaryDirectory() as temp_dir:
+                    path = Path(temp_dir) / "invalid.yaml"
+                    path.write_text(yaml.safe_dump(source), encoding="utf-8")
+                    with self.assertRaisesRegex(ValueError, "environment"):
+                        load_v3_config(path)
+
+        source = yaml.safe_load(V3_PATH.read_text(encoding="utf-8"))
+        source["environment"].update(
+            {
+                "current_amplitude_scale": 0.0,
+                "eval_initial_position_std": 0.0,
+                "eval_initial_velocity_std": 0.0,
+                "vertical_current": -10.0,
+            }
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "valid.yaml"
+            path.write_text(yaml.safe_dump(source), encoding="utf-8")
+            config = load_v3_config(path)
+            self.assertEqual(config.environment.current_amplitude_scale, 0.0)
+            self.assertEqual(config.environment.eval_initial_position_std, 0.0)
+            self.assertEqual(config.environment.eval_initial_velocity_std, 0.0)
+            self.assertEqual(config.environment.vertical_current, -10.0)
+
     def test_non_finite_float_values_are_rejected(self):
         from pac.experiment_config import _float_value, load_v3_config
 

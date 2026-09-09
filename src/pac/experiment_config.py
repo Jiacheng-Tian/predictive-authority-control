@@ -13,6 +13,9 @@ import yaml
 from pac.evaluation.seeds import validate_disjoint_seed_partitions
 
 
+_MAX_SEED = 2**64 - 1
+
+
 @dataclass(frozen=True)
 class ProtocolConfig:
     version: str
@@ -174,6 +177,8 @@ def _seed_tuple(value: Any, role: str) -> tuple[int, ...]:
     for seed in result:
         if seed < 0:
             raise ValueError(f"negative seed in role {role}: {seed}")
+        if seed > _MAX_SEED:
+            raise ValueError(f"seed in role {role} exceeds uint64 maximum: {seed}")
     return result
 
 
@@ -223,6 +228,18 @@ def load_v3_config(path: str | Path) -> V3ExperimentConfig:
         raise ValueError("environment scenarios must be exactly (1, 2, 3)")
     if environment.dt <= 0.0 or environment.steps <= 0:
         raise ValueError("environment dt and steps must be positive")
+    if (
+        environment.mass_scale_xy <= 0.0
+        or environment.damping_scale_xy <= 0.0
+        or environment.current_frequency_scale <= 0.0
+    ):
+        raise ValueError("environment mass, damping, and current frequency scales must be positive")
+    if (
+        environment.current_amplitude_scale < 0.0
+        or environment.eval_initial_position_std < 0.0
+        or environment.eval_initial_velocity_std < 0.0
+    ):
+        raise ValueError("environment current amplitude and evaluation std values must be non-negative")
 
     controller_data = _section(data, "controller")
     controller = ControllerConfig(

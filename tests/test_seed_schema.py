@@ -28,6 +28,8 @@ class SeedSchemaTest(unittest.TestCase):
             validate_disjoint_seed_partitions({"search": (51000,), "eval": (51000,)})
         with self.assertRaisesRegex(ValueError, r"model.*-1"):
             validate_disjoint_seed_partitions({"model": (-1,)})
+        with self.assertRaisesRegex(ValueError, r"model.*18446744073709551616"):
+            validate_disjoint_seed_partitions({"model": (2**64,)})
 
 
 if __name__ == "__main__":
