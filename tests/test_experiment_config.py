@@ -107,6 +107,92 @@ class V3ExperimentConfigTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, r"q_diag.*12"):
                 load_v3_config(path)
 
+    def test_every_seed_role_rejects_negative_seeds(self):
+        from pac.experiment_config import load_v3_config
+
+        seed_fields = {
+            ("training", "oracle_train_seeds"): "oracle_train",
+            ("training", "oracle_val_seeds"): "oracle_val",
+            ("training", "model_seeds"): "model",
+            ("evaluation", "episode_seeds"): "evaluation",
+            ("sspo", "search_seeds"): "sspo_search",
+            ("sspo", "eval_seeds"): "sspo_eval",
+            ("robustness", "eval_seeds"): "robustness_eval",
+        }
+        for (section, field), role in seed_fields.items():
+            source = yaml.safe_load(V3_PATH.read_text(encoding="utf-8"))
+            source[section][field] = [-1]
+            with self.subTest(role=role):
+                with tempfile.TemporaryDirectory() as temp_dir:
+                    path = Path(temp_dir) / "invalid.yaml"
+                    path.write_text(yaml.safe_dump(source), encoding="utf-8")
+                    with self.assertRaisesRegex(ValueError, rf"{role}.*-1"):
+                        load_v3_config(path)
+
+    def test_non_finite_float_values_are_rejected(self):
+        from pac.experiment_config import _float_value, load_v3_config
+
+        for value in (float("nan"), float("inf"), float("-inf")):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(ValueError, "finite"):
+                    _float_value(value, "test_value")
+
+        source = yaml.safe_load(V3_PATH.read_text(encoding="utf-8"))
+        source["environment"]["dt"] = float("nan")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "invalid.yaml"
+            path.write_text(yaml.safe_dump(source), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "finite"):
+                load_v3_config(path)
+
+    def test_formal_scenarios_must_be_exactly_one_two_three(self):
+        from pac.experiment_config import load_v3_config
+
+        for scenarios in ([1, 2], [1, 2, 4]):
+            source = yaml.safe_load(V3_PATH.read_text(encoding="utf-8"))
+            source["environment"]["scenarios"] = scenarios
+            with self.subTest(scenarios=scenarios):
+                with tempfile.TemporaryDirectory() as temp_dir:
+                    path = Path(temp_dir) / "invalid.yaml"
+                    path.write_text(yaml.safe_dump(source), encoding="utf-8")
+                    with self.assertRaisesRegex(ValueError, r"scenarios.*1.*2.*3"):
+                        load_v3_config(path)
+
+    def test_required_strings_reject_null_list_and_blank_values(self):
+        from pac.experiment_config import load_v3_config
+
+        fields = [
+            (("protocol", "version"), None),
+            (("controller", "primary"), []),
+            (("controller", "authority"), "  "),
+            (("environment", "vehicle_profile"), None),
+            (("environment", "thruster_layout"), []),
+            (("outputs", "run_root"), ""),
+            (("outputs", "evidence_root"), None),
+        ]
+        for (section, field), invalid in fields:
+            source = yaml.safe_load(V3_PATH.read_text(encoding="utf-8"))
+            source[section][field] = invalid
+            with self.subTest(field=f"{section}.{field}"):
+                with tempfile.TemporaryDirectory() as temp_dir:
+                    path = Path(temp_dir) / "invalid.yaml"
+                    path.write_text(yaml.safe_dump(source), encoding="utf-8")
+                    with self.assertRaisesRegex(ValueError, "non-empty string"):
+                        load_v3_config(path)
+
+    def test_output_paths_must_be_relative_and_contained(self):
+        from pac.experiment_config import load_v3_config
+
+        for field, invalid in (("run_root", "C" + ":/absolute"), ("evidence_root", "results/../escape")):
+            source = yaml.safe_load(V3_PATH.read_text(encoding="utf-8"))
+            source["outputs"][field] = invalid
+            with self.subTest(field=field):
+                with tempfile.TemporaryDirectory() as temp_dir:
+                    path = Path(temp_dir) / "invalid.yaml"
+                    path.write_text(yaml.safe_dump(source), encoding="utf-8")
+                    with self.assertRaisesRegex(ValueError, r"relative|parent"):
+                        load_v3_config(path)
+
 
 if __name__ == "__main__":
     unittest.main()

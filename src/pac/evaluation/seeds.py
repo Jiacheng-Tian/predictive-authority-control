@@ -13,6 +13,10 @@ def validate_disjoint_seed_partitions(
     for role, seeds in partitions.items():
         role_seen: set[int] = set()
         for seed in seeds:
+            if isinstance(seed, bool) or not isinstance(seed, int):
+                raise ValueError(f"seed in role {role} must be an integer: {seed!r}")
+            if seed < 0:
+                raise ValueError(f"negative seed in role {role}: {seed}")
             if seed in role_seen:
                 raise ValueError(f"duplicate seed in role {role}: {seed}")
             role_seen.add(seed)

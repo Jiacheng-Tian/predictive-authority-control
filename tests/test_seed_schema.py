@@ -9,6 +9,8 @@ class SeedSchemaTest(unittest.TestCase):
 
         self.assertEqual(episode_uid(3, 41007), "scn3_env41007")
         self.assertEqual(episode_uid(3, 41007), episode_uid(3, 41007))
+        self.assertNotEqual(episode_uid(4, 41007), episode_uid(3, 41007))
+        self.assertNotEqual(episode_uid(3, 41008), episode_uid(3, 41007))
 
     def test_episode_uid_has_no_model_seed_parameter(self):
         from inspect import signature
@@ -24,6 +26,8 @@ class SeedSchemaTest(unittest.TestCase):
             validate_disjoint_seed_partitions({"model": (31000, 31000)})
         with self.assertRaisesRegex(ValueError, r"search.*eval.*51000|eval.*search.*51000"):
             validate_disjoint_seed_partitions({"search": (51000,), "eval": (51000,)})
+        with self.assertRaisesRegex(ValueError, r"model.*-1"):
+            validate_disjoint_seed_partitions({"model": (-1,)})
 
 
 if __name__ == "__main__":

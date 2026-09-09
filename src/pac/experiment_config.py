@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 from pathlib import Path
+from pathlib import PureWindowsPath
 from typing import Any
 
 import yaml
@@ -133,7 +135,24 @@ def _int_value(value: Any, name: str) -> int:
 def _float_value(value: Any, name: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError(f"{name} must be numeric")
-    return float(value)
+    result = float(value)
+    if not math.isfinite(result):
+        raise ValueError(f"{name} must be finite")
+    return result
+
+
+def _non_empty_string(value: Any, name: str, *, relative_path: bool = False) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{name} must be a non-empty string")
+    result = value.strip()
+    if relative_path:
+        path = Path(result)
+        windows_path = PureWindowsPath(result)
+        if path.anchor or windows_path.anchor:
+            raise ValueError(f"{name} must be a relative path")
+        if ".." in path.parts or ".." in windows_path.parts:
+            raise ValueError(f"{name} must not contain parent path '..'")
+    return result
 
 
 def _int_tuple(value: Any, role: str) -> tuple[int, ...]:
@@ -150,12 +169,11 @@ def _int_tuple(value: Any, role: str) -> tuple[int, ...]:
     return tuple(result)
 
 
-def _int_vector(value: Any, name: str, length: int) -> tuple[int, ...]:
-    if not isinstance(value, (list, tuple)) or not value:
-        raise ValueError(f"{name} must be a non-empty list")
-    result = tuple(_int_value(item, name) for item in value)
-    if len(result) != length:
-        raise ValueError(f"{name} must contain exactly {length} values")
+def _seed_tuple(value: Any, role: str) -> tuple[int, ...]:
+    result = _int_tuple(value, role)
+    for seed in result:
+        if seed < 0:
+            raise ValueError(f"negative seed in role {role}: {seed}")
     return result
 
 
@@ -176,7 +194,9 @@ def load_v3_config(path: str | Path) -> V3ExperimentConfig:
         raise ValueError("v3 config root must be a mapping")
 
     protocol_data = _section(data, "protocol")
-    protocol = ProtocolConfig(version=str(_required(protocol_data, "version")))
+    protocol = ProtocolConfig(
+        version=_non_empty_string(_required(protocol_data, "version"), "protocol.version")
+    )
     if protocol.version != "formal_true_mpc_v3":
         raise ValueError("protocol.version must be formal_true_mpc_v3")
 
@@ -192,16 +212,22 @@ def load_v3_config(path: str | Path) -> V3ExperimentConfig:
         vertical_current=_float_value(_required(env, "vertical_current"), "environment.vertical_current"),
         eval_initial_position_std=_float_value(_required(env, "eval_initial_position_std"), "environment.eval_initial_position_std"),
         eval_initial_velocity_std=_float_value(_required(env, "eval_initial_velocity_std"), "environment.eval_initial_velocity_std"),
-        vehicle_profile=str(_required(env, "vehicle_profile")),
-        thruster_layout=str(_required(env, "thruster_layout")),
+        vehicle_profile=_non_empty_string(
+            _required(env, "vehicle_profile"), "environment.vehicle_profile"
+        ),
+        thruster_layout=_non_empty_string(
+            _required(env, "thruster_layout"), "environment.thruster_layout"
+        ),
     )
+    if environment.scenarios != (1, 2, 3):
+        raise ValueError("environment scenarios must be exactly (1, 2, 3)")
     if environment.dt <= 0.0 or environment.steps <= 0:
         raise ValueError("environment dt and steps must be positive")
 
     controller_data = _section(data, "controller")
     controller = ControllerConfig(
-        primary=str(_required(controller_data, "primary")),
-        authority=str(_required(controller_data, "authority")),
+        primary=_non_empty_string(_required(controller_data, "primary"), "controller.primary"),
+        authority=_non_empty_string(_required(controller_data, "authority"), "controller.authority"),
     )
 
     actuator_data = _section(data, "actuator")
@@ -253,9 +279,9 @@ def load_v3_config(path: str | Path) -> V3ExperimentConfig:
 
     training_data = _section(data, "training")
     training = TrainingConfig(
-        oracle_train_seeds=_int_tuple(_required(training_data, "oracle_train_seeds"), "oracle_train"),
-        oracle_val_seeds=_int_tuple(_required(training_data, "oracle_val_seeds"), "oracle_val"),
-        model_seeds=_int_tuple(_required(training_data, "model_seeds"), "model"),
+        oracle_train_seeds=_seed_tuple(_required(training_data, "oracle_train_seeds"), "oracle_train"),
+        oracle_val_seeds=_seed_tuple(_required(training_data, "oracle_val_seeds"), "oracle_val"),
+        model_seeds=_seed_tuple(_required(training_data, "model_seeds"), "model"),
         max_epochs=_int_value(_required(training_data, "max_epochs"), "training.max_epochs"),
         patience=_int_value(_required(training_data, "patience"), "training.patience"),
     )
@@ -264,24 +290,28 @@ def load_v3_config(path: str | Path) -> V3ExperimentConfig:
 
     evaluation_data = _section(data, "evaluation")
     evaluation = EvaluationConfig(
-        episode_seeds=_int_tuple(_required(evaluation_data, "episode_seeds"), "evaluation"),
+        episode_seeds=_seed_tuple(_required(evaluation_data, "episode_seeds"), "evaluation"),
     )
 
     sspo_data = _section(data, "sspo")
     sspo = SSPOConfig(
-        search_seeds=_int_tuple(_required(sspo_data, "search_seeds"), "sspo_search"),
-        eval_seeds=_int_tuple(_required(sspo_data, "eval_seeds"), "sspo_eval"),
+        search_seeds=_seed_tuple(_required(sspo_data, "search_seeds"), "sspo_search"),
+        eval_seeds=_seed_tuple(_required(sspo_data, "eval_seeds"), "sspo_eval"),
     )
 
     robustness_data = _section(data, "robustness")
     robustness = RobustnessConfig(
-        eval_seeds=_int_tuple(_required(robustness_data, "eval_seeds"), "robustness_eval"),
+        eval_seeds=_seed_tuple(_required(robustness_data, "eval_seeds"), "robustness_eval"),
     )
 
     outputs_data = _section(data, "outputs")
     outputs = OutputConfig(
-        run_root=str(_required(outputs_data, "run_root")),
-        evidence_root=str(_required(outputs_data, "evidence_root")),
+        run_root=_non_empty_string(
+            _required(outputs_data, "run_root"), "outputs.run_root", relative_path=True
+        ),
+        evidence_root=_non_empty_string(
+            _required(outputs_data, "evidence_root"), "outputs.evidence_root", relative_path=True
+        ),
     )
 
     config = V3ExperimentConfig(
