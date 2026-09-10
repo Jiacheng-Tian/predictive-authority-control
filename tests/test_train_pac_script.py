@@ -134,6 +134,32 @@ class TrainPacScriptTest(unittest.TestCase):
             self.assertFalse(output.exists())
             self.assertEqual(list(root.glob(".output.tmp-*")), [])
 
+    def test_atomic_output_retries_a_transient_permission_error(self):
+        import os
+        import scripts.train_pac as train_pac
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            temporary_output = root / ".formal.tmp-test"
+            output = root / "formal"
+            temporary_output.mkdir()
+            (temporary_output / "payload.txt").write_text("ok", encoding="ascii")
+            real_replace = os.replace
+            calls = 0
+
+            def flaky_replace(source, target):
+                nonlocal calls
+                calls += 1
+                if calls == 1:
+                    raise PermissionError(5, "access denied")
+                real_replace(source, target)
+
+            with patch.object(train_pac.os, "replace", side_effect=flaky_replace):
+                train_pac._publish_output_directory(temporary_output, output)
+
+            self.assertEqual(calls, 2)
+            self.assertEqual((output / "payload.txt").read_text(encoding="ascii"), "ok")
+
     def test_formal_rejects_dirty_worktree_without_debug_override(self):
         import scripts.train_pac as train_pac
 

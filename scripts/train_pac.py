@@ -12,6 +12,7 @@ from pathlib import Path
 import shutil
 import sys
 import tempfile
+import time
 from typing import Any
 
 
@@ -58,6 +59,21 @@ def _reject_path_relationships(dataset_dir: Path, output_dir: Path) -> None:
         pass
     else:
         raise ValueError("dataset directory must not be inside output directory")
+
+
+def _publish_output_directory(temporary_output: Path, output_dir: Path) -> None:
+    """Atomically publish training output, tolerating transient Windows locks."""
+    retry_delays = (0.05, 0.1, 0.2)
+    for attempt, delay in enumerate(retry_delays):
+        if output_dir.exists():
+            raise FileExistsError(f"output directory appeared during training: {output_dir}")
+        try:
+            os.replace(temporary_output, output_dir)
+            return
+        except PermissionError:
+            if attempt == len(retry_delays) - 1:
+                raise
+            time.sleep(delay)
 
 
 def _read_dataset_manifest(dataset_dir: Path) -> dict[str, Any]:
@@ -256,9 +272,7 @@ def main(argv: list[str] | None = None) -> int:
             json.dumps(manifest, indent=2, sort_keys=True, default=_json_default),
             encoding="utf-8",
         )
-        if output_dir.exists():
-            raise FileExistsError(f"output directory appeared during training: {output_dir}")
-        os.replace(temporary_output, output_dir)
+        _publish_output_directory(temporary_output, output_dir)
         temporary_output = None
     finally:
         if temporary_output is not None:

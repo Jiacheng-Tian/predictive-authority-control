@@ -1,0 +1,68 @@
+{
+  "ci_basis": "five model-seed effects with t(4), not pooled rollout SD",
+  "methods": [
+    "real10kg_smc_steady",
+    "real10kg_mpc_ltv_v3",
+    "predictive_alpha"
+  ],
+  "metrics": [
+    "rmse_3d",
+    "heading_rmse_deg",
+    "applied_control_cost",
+    "action_saturation_step_fraction",
+    "solver_fallback_step_fraction",
+    "solver_deadline_miss_step_fraction",
+    "actuator_rate_limit_episode_mean",
+    "final_error",
+    "max_error",
+    "success_1m"
+  ],
+  "paired_effect_rows": 120,
+  "plan": {
+    "environment_seeds": [
+      41000,
+      41001,
+      41002,
+      41003,
+      41004,
+      41005,
+      41006,
+      41007,
+      41008,
+      41009,
+      41010,
+      41011,
+      41012,
+      41013,
+      41014,
+      41015,
+      41016,
+      41017,
+      41018,
+      41019
+    ],
+    "episode_count": 60,
+    "model_seeds": [
+      31000,
+      31001,
+      31002,
+      31003,
+      31004
+    ],
+    "profile": "formal",
+    "rollout_count": 420,
+    "scenarios": [
+      1,
+      2,
+      3
+    ],
+    "steps": 2100
+  },
+  "profile": "formal",
+  "protocol_version": "formal_true_mpc_v3",
+  "raw_rows": 420,
+  "run_id": "formal",
+  "status": "complete",
+  "timeseries_files": 420,
+  "window_rows": 1680
+}

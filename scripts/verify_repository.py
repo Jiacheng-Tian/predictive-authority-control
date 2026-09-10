@@ -12,6 +12,7 @@ from pathlib import Path
 
 from pac.authority.model import load_alpha_model_checkpoint
 from pac.config import load_config
+from pac.evaluation.evidence_v3 import verify_evidence as verify_v3_directory
 from pac.evaluation.summary import summarize_formal_results
 from pac.repository import file_sha256, repository_files
 
@@ -44,6 +45,7 @@ REQUIRED_FILES = [
     "src/pac/evaluation/metrics.py",
     "src/pac/evaluation/summary.py",
     "scripts/run_formal_seeded_protocol.py",
+    "scripts/formal_v3_evidence.py",
     "scripts/sspo_alpha_calibration.py",
     "scripts/summarize_formal_results.py",
     "scripts/update_release_manifest.py",
@@ -157,6 +159,22 @@ def verify_evidence(failures: list[str]) -> None:
         failures.append("derived merged PAC timeseries must not be stored")
 
 
+def verify_v3_evidence(failures: list[str]) -> None:
+    evidence_root = ROOT / "results" / "formal_v3"
+    if not evidence_root.is_dir():
+        failures.append("v3 evidence root is missing")
+        return
+    evidence_dirs = sorted(path for path in evidence_root.iterdir() if path.is_dir())
+    if not evidence_dirs:
+        failures.append("v3 evidence root has no promoted evidence directory")
+        return
+    for evidence_dir in evidence_dirs:
+        try:
+            verify_v3_directory(evidence_dir, repo_root=ROOT)
+        except ValueError as exc:
+            failures.append(f"v3 evidence validation failed: {evidence_dir.name}: {exc}")
+
+
 def main() -> int:
     failures: list[str] = []
     manifest_path = ROOT / "MANIFEST.csv"
@@ -231,6 +249,7 @@ def main() -> int:
         failures.append(f"non-portable or disallowed text: {text_offenders}")
 
     verify_evidence(failures)
+    verify_v3_evidence(failures)
     summary = {
         "repository_root": ROOT.name,
         "manifest_rows": len(manifest_rows),

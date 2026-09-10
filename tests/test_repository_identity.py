@@ -41,6 +41,28 @@ class RepositoryIdentityTest(unittest.TestCase):
         ):
             self.assertNotIn(phrase, text.lower())
 
+    def test_readme_distinguishes_legacy_v2_from_mixed_v3_evidence(self):
+        text = (ROOT / "README.md").read_text(encoding="utf-8")
+        normalized = " ".join(text.split())
+
+        self.assertIn("legacy one-step predictive v2 evidence", normalized)
+        self.assertIn("not comparable with v3", normalized)
+        self.assertIn("## v3 simulation-only formal evidence", normalized)
+        self.assertIn(
+            "The v3 formal evidence is standalone, simulation-only evidence",
+            normalized,
+        )
+        self.assertIn("results/formal_v3/formal-2026-09-10", normalized)
+        self.assertIn("metric-specific mixed result", normalized)
+        self.assertIn("PAC/predictive_alpha", normalized)
+        self.assertIn("0.00760 m", normalized)
+        self.assertIn("model-seed t(4) CI [-0.00794, -0.00726]", normalized)
+        self.assertIn(
+            "higher `heading_rmse_deg` and `solver_deadline_miss_step_fraction`",
+            normalized,
+        )
+        self.assertNotIn("overall improvement", normalized.lower())
+
     def test_runtime_uses_only_the_installable_pac_package(self):
         legacy_sources = []
         if (ROOT / "code").exists():
