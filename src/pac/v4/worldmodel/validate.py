@@ -606,9 +606,9 @@ def evaluate_world_model(
 def nan_to_none(value: Any) -> Any:
     """Replace non-finite floats with null so the report is strict JSON."""
     if isinstance(value, dict):
-        return {key: _nan_to_none(item) for key, item in value.items()}
+        return {key: nan_to_none(item) for key, item in value.items()}
     if isinstance(value, (list, tuple)):
-        return [_nan_to_none(item) for item in value]
+        return [nan_to_none(item) for item in value]
     if isinstance(value, (float, np.floating)):
         number = float(value)
         return number if np.isfinite(number) else None
