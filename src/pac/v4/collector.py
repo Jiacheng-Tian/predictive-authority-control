@@ -9,8 +9,9 @@ physics + residual world model:
 * requested (blended) and actuator-applied actions,
 * estimated (causal) and true currents,
 * the MPC plan active at that step plus solver telemetry flags,
-* the physics-only predicted next state under the realized current
-  (precomputed residual target).
+* the physics-only predicted next state under the applied (post-actuator)
+  action and the causal estimated current — the deployable baseline whose
+  mismatch with the realized next state defines the residual target.
 
 Collection never writes inside v3 output trees and refuses non-empty output
 directories.  ``_collect_single_plan`` is a pure per-episode function so a
@@ -391,9 +392,6 @@ def _collect_single_plan(config, plan: dict) -> dict:
         requested = (1.0 - alpha) * np.asarray(primary_action, dtype=float) \
             + alpha * np.asarray(authority_action, dtype=float)
         requested = np.clip(requested, -1.0, 1.0)
-        physics_prediction = _physics_next_state(
-            dynamics, action_to_wrench, state, requested, true_current
-        )
 
         done, step_info = environment.step(requested)
         applied = np.asarray(step_info["applied_action"], dtype=float)
@@ -401,6 +399,13 @@ def _collect_single_plan(config, plan: dict) -> dict:
             np.asarray(dynamics.eta, dtype=float),
             np.asarray(dynamics.nu, dtype=float),
         ])
+        # The physics baseline must reproduce the realized transition's own
+        # command path: the applied (post-actuator) action and the causal
+        # estimated current.  Using the pre-actuator request would make the
+        # "residual" absorb the actuator slew difference and poison rollouts.
+        physics_prediction = _physics_next_state(
+            dynamics, action_to_wrench, state, applied, estimated_current
+        )
 
         episode_features.append(assemble_wm_feature(
             state, requested, applied, estimated_current, context_base,
