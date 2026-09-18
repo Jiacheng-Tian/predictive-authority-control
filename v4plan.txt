@@ -1,0 +1,391 @@
+v4 实验计划：世界模型增强的 Transformer 骨干 Residual RL Authority
+
+## Summary
+
+采用分阶段路线：
+
+1. 保留当前 v3 Transformer 作为 authority policy 的时序骨干。
+2. 先加入物理模型残差世界模型，验证未来状态和控制代价预测。
+3. 再加入 residual RL，仅输出 \(\Delta\alpha\)，不改变现有 SMC/MPC 和动作接口。
+4. 最后评估世界模型、RL 和安全约束的独立贡献。
+
+### 主假设与版本定义
+
+v4 的主假设是：世界模型提供的未来状态、代价和不确定性信息，能够使 authority policy 在未见扰动下更准确地选择 alpha。Residual RL 是第二层优化，不预设其必然优于 v3；如果 RL 在 unseen 环境不稳定，则以 world-model-assisted predictive authority 作为主线。
+
+为保证贡献可分离，所有新实验定义为四个固定版本：
+
+- `v3`：冻结的 supervised Transformer baseline；
+- `v4-WM`：Transformer 加世界模型，不加入 RL；
+- `v4-RL`：Transformer 加 residual RL，不使用世界模型输入；
+- `v4-WM-RL`：世界模型辅助的 Transformer residual RL 完整模型。
+
+主要比较关系固定为：`v3 → v4-WM` 衡量世界模型贡献，`v3 → v4-RL` 衡量 residual RL 贡献，`v4-RL → v4-WM-RL` 衡量世界模型对 RL 的额外贡献。v3 的配置、checkpoint 和 formal evidence 保持只读。
+
+部署策略保持为：
+
+\[
+\alpha_t =
+\Pi_{\mathrm{safe}}
+\left[
+\alpha_t^{\mathrm{Transformer}}
++
+\lambda \Delta\alpha_t^{\mathrm{RL}}
+\right]
+\]
+
+其中 \(\Pi_{\mathrm{safe}}\) 保留当前 alpha 边界、平滑、变化率限制和强制 primary fallback。
+
+第一阶段不让 RL 决定 MPC 调用频率、预测时域或求解预算，避免同时改变控制策略和计算调度，保证实验解释清晰。
+
+## 阶段一：世界模型与随机扰动扩展
+
+### 目标
+
+验证世界模型能否在当前物理仿真器基础上预测：
+
+- 下一状态；
+- 未来 \(H=10\) 和 \(H=20\) 步状态；
+- position/heading tracking cost；
+- 控制输入变化和饱和风险；
+- 预测不确定性。
+
+### 世界模型
+
+使用物理模型加残差形式：
+
+\[
+x_{t+1}
+=
+f_{\mathrm{physics}}(x_t,u_t,\hat d_t)
++
+r_\theta(x_{t-L:t},u_{t-L:t},\hat d_{t-L:t})
+\]
+
+第一版采用：
+
+- Transformer 或 GRU residual dynamics encoder；
+- 输入：当前状态、历史状态、SMC/MPC action、applied action、真实/估计海流、solver telemetry；
+- 输出：\(\Delta x_{t+1}\)；
+- ensemble 数量：5；
+- 预测 horizon：10、20；
+- 不确定性：ensemble mean 和 variance。
+
+世界模型训练不得使用正式测试环境种子。数据划分为：
+
+- train：新的训练种子；
+- validation：独立种子；
+- test：完全未见的环境种子和扰动参数。
+
+### 环境扩展
+
+保留 v3 的三种正式场景：
+
+1. constant；
+2. sinusoidal；
+3. stepchange。
+
+新增独立 robustness 场景：
+
+- Gaussian–Markov/Ornstein–Uhlenbeck current；
+- colored noise current；
+- 随机幅值和随机相关时间；
+- 未见过的频率和幅值组合；
+- current estimation delay/noise；
+- mass/damping mismatch；
+- actuator delay 和 action noise。
+
+stepchange 不删除，而作为结构化突变场景保留；随机海流作为额外泛化测试。
+
+### 阶段一实验组
+
+- physics-only；
+- residual world model；
+- deterministic residual model；
+- ensemble residual model；
+- oracle rollout without world model；
+- world-model rollout authority。
+
+### 阶段一验收标准
+
+世界模型进入下一阶段必须同时满足：
+
+- one-step state prediction 明显优于 physics-only；
+- 10/20-step rollout error 在未见扰动测试集上保持稳定；
+- ensemble uncertainty 与实际预测误差具有正相关；
+- 不确定性升高时，能识别 stepchange、随机海流和参数失配；
+- 使用世界模型进行 candidate alpha rollout 后，authority ranking 与真实闭环 cost ranking 具有显著一致性。
+
+如果只改善 one-step 误差但不能改善多步 cost ranking，不将其作为 RL 的决策模型。
+
+## 阶段二：Transformer 骨干 Residual RL
+
+### 策略结构
+
+保留当前 `TemporalAlphaTransformer` 的输入投影、位置编码和 temporal encoder。
+
+增加两个输出：
+
+\[
+\alpha_t^{base} = h_{\mathrm{Transformer}}(z_t)
+\]
+
+\[
+\Delta\alpha_t =
+\delta_{\max}\tanh(h_{\mathrm{RL}}(z_t,\hat J_t,\hat\sigma_t))
+\]
+
+最终策略：
+
+\[
+\alpha_t =
+\operatorname{clip}
+\left(
+\alpha_t^{base}+\lambda\Delta\alpha_t,
+0,1
+\right)
+\]
+
+并继续使用现有：
+
+- alpha smoothing；
+- alpha rate limit；
+- alpha deadband；
+- forced-primary；
+- actuator saturation 和 slew limit。
+
+RL 不直接输出推进器动作，也不改变 SMC/MPC 控制器。
+
+### RL 算法
+
+第一版采用连续动作 TD3：
+
+- actor：Transformer backbone + residual alpha head；
+- critic：双 critic；
+- actor 初始化：当前 v3 Transformer checkpoint；
+- residual head 初始输出接近 0；
+- backbone 初期冻结；
+- 第二轮实验只解冻 Transformer 最后一个 encoder/head block；
+- 不允许从随机策略开始作为主实验。
+
+TD3 采用受约束的 simulator-first 训练协议。v3 Transformer checkpoint 初始化 actor，residual head 零初始化，第一轮冻结 backbone。replay buffer 以 simulator transitions 为主，已有 oracle transitions 只用于 replay warm start；world-model rollout 不在第一轮大量生成 synthetic transitions，以避免模型偏差污染 critic。所有 transition 使用同一 reward 版本和同一安全投影，训练前固定 simulator/oracle 数据比例、行为正则系数、residual 上界和训练步数。第二轮只解冻最后一个 encoder/head block。不得根据单个 seed 的结果临时修改 reward 或采样比例。
+
+RL 训练使用 simulator interaction 和已有 oracle transitions 的混合数据。为避免策略偏离现有安全分布：
+
+- residual action 设定明确上下界；
+- 对 \(\Delta\alpha\) 使用行为正则；
+- 对超出训练分布的状态启用 conservative fallback；
+- 保留 Transformer-only policy 作为行为参考；
+- 不使用无约束 online exploration 作为正式结果。
+
+### Reward
+
+单步 reward 采用归一化加权形式：
+
+\[
+r_t =
+-w_e e_{\mathrm{pos}}
+-w_h e_{\mathrm{heading}}
+-w_u\|u_t\|^2
+-w_{\Delta u}\|\Delta u_t\|^2
+-w_{\Delta\alpha}|\Delta\alpha_t|
+-w_s \rho_{\mathrm{saturation}}
+-w_d \rho_{\mathrm{deadline}}
+-w_c \rho_{\mathrm{constraint}}
+\]
+
+权重在训练前固定，并记录在配置和 manifest 中。所有模型使用相同 reward，不允许按结果调权重。
+
+其中：
+
+- position error 是主项；
+- heading error 防止 PAC 通过牺牲航向获得位置改善；
+- alpha variation 保证策略平滑；
+- deadline penalty 仅作为 telemetry penalty，第一轮不让 RL 修改 MPC 调用；
+- constraint violation 使用高惩罚；
+- fallback 不作为训练自由行为，而作为安全机制。
+
+### 阶段二对照
+
+必须包含：
+
+- SMC；
+- MPC；
+- v3 supervised Transformer；
+- Transformer + residual RL；
+- randomly initialized RL head；
+- frozen Transformer + RL head；
+- partially unfrozen Transformer + RL head；
+- oracle authority；
+- constant-alpha baseline；
+- optional threshold baseline。
+
+主结果应比较：
+
+1. v3 Transformer vs residual RL；
+2. frozen vs partially unfrozen；
+3. world model absent vs world model present；
+4. constrained vs unconstrained residual；
+5. oracle vs learned policy gap。
+
+## 阶段三：世界模型辅助 authority 选择
+
+在 RL 不改变 MPC 调用策略的前提下，加入世界模型预测量：
+
+- candidate alpha rollout cost；
+- predicted uncertainty；
+- predicted saturation probability；
+- predicted heading degradation；
+- predicted recovery time。
+
+这些量作为 Transformer/RL head 的额外输入，形成：
+
+\[
+\pi_{\mathrm{authority}}
+(
+\text{history},
+\hat J_{\alpha},
+\hat\sigma_{\alpha},
+\hat\rho_{\alpha}
+)
+\]
+
+候选 alpha 使用现有 11 点 grid，确保与 v3 oracle 直接可比。后续可以增加连续 alpha，但不得在第一轮同时改变 grid、world model 和 RL 算法。
+
+这一阶段的核心问题是：
+
+> 世界模型是否让 authority policy 在未见随机扰动下更准确地选择未来表现更好的 alpha？
+
+如果 world model 只改善预测误差而不改善 authority ranking，则不将它作为主要创新点。
+
+## 评价指标与论文呈现
+
+### 主文核心指标
+
+主文只保留五项控制结果指标和一项统计呈现：
+
+- position/3D RMSE；
+- heading RMSE；
+- control cost；
+- deadline miss fraction；
+- constraint violation；
+- 多模型种子的置信区间。
+
+world model 的机制证据单独报告，不与控制结果指标混在同一张主表中。主文机制图优先展示 candidate-alpha ranking regret、selection accuracy 和 unseen 扰动下的泛化差异。
+
+这些指标分别对应跟踪、姿态、能耗、实时性、安全性和统计稳定性。
+
+### 补充材料指标
+
+补充材料报告：
+
+- p50/p95/p99 solver time；
+- saturation ratio；
+- action variation；
+- alpha variation；
+- forced-primary fraction；
+- fallback fraction；
+- MPC call ratio；
+- recovery time；
+- world-model one-step/10-step/20-step error；
+- uncertainty calibration；
+- CVaR 或 worst-case cost；
+- 训练时间和部署推理时间。
+
+world model 还必须报告 one-step/10-step/20-step prediction error、uncertainty calibration、prediction-interval coverage、uncertainty-error correlation、candidate-alpha ranking correlation、selection accuracy 和 ranking regret。若某指标不对应论文中的明确主张，则不进入主文。
+
+指标只有在对应论文主张存在时才进入主文。例如，若不声称降低计算量，则 MPC call ratio 不放入主结果表；但 deadline miss 由于当前 v3 已存在明显问题，必须保留。
+
+## 数据、种子和统计协议
+
+所有方法必须使用相同的：
+
+- `EpisodeSpec`；
+- environment seeds；
+- scenario；
+- initial condition；
+- current estimator；
+- actuator dynamics；
+- controller pair；
+- metric timing。
+
+训练、验证和测试种子完全不重叠。
+
+建议采用：
+
+- 5 个 model seeds；
+- 每个方法至少 20 个 seen-seed episodes；
+- 20 个 unseen-seed episodes；
+- 每个场景单独报告；
+- 结构化场景和随机扰动场景分开报告；
+- paired evaluation；
+- model-seed level 的均值和 t(4) confidence interval；
+- 不把所有 timestep 当作独立统计样本。
+
+统计设计进一步固定为：
+
+- 5 个 model seeds；
+- 20 个 seen environment seeds；
+- 20 个 unseen environment seeds；
+- 每个 model seed 在完全相同的环境种子上进行 paired evaluation；
+- seen 与 unseen 结果分开汇总，结构化场景与随机扰动场景分开报告；
+- 以 model seed 的 episode-level aggregate 作为主要统计单位；
+- 不把 timestep、window 或 rollout 当作独立重复样本。
+
+主要显著性比较：
+
+- residual RL vs supervised Transformer；
+- world model + residual RL vs residual RL；
+- unseen stochastic current 下的性能差异。
+
+world model 的主要机制检验包括 candidate-alpha ranking correlation、top-1 selection accuracy 和 ranking regret；控制性能的置信区间继续以 model-seed level 计算。显著性检验只针对预先登记的主比较，避免对所有指标无限制检验。
+
+不对所有指标无限制进行显著性检验，避免多重比较和结果堆砌。
+
+## 代码与接口计划
+
+后续实现需要新增或扩展以下接口：
+
+- world-model dataset builder；
+- residual dynamics model；
+- ensemble uncertainty wrapper；
+- candidate-alpha rollout evaluator；
+- Transformer residual policy；
+- constrained TD3 trainer；
+- RL checkpoint metadata；
+- world-model checkpoint metadata；
+- unified evaluation adapter；
+- paired ablation runner；
+- statistical summary exporter。
+
+现有 v3 接口保持兼容：
+
+- `run_predictive_alpha_episode` 原有 Transformer 模式继续可运行；
+- 新策略通过显式 `policy_architecture` 分支接入；
+- 原有 formal v3 结果不重算、不覆盖；
+- 新实验输出到独立 run/evidence 目录；
+- 所有 checkpoint 记录输入维度、history length、controller pair、alpha limits、reward version、world-model version 和 seed。
+
+## 最终论文判定门槛
+
+只有满足以下条件，才把方法写成完整的 Transformer–world-model–RL 方法：
+
+1. residual RL 在 seen 和 unseen 环境中均不劣于 v3 Transformer；
+2. world model 在多步预测和 candidate ranking 上有效；
+3. RL 改善不是通过明显增加 heading error、saturation 或 constraint violation 获得；
+4. deadline miss 不恶化；
+5. ablation 能分别证明 Transformer、world model、RL residual 和 safety projection 的作用；
+6. 结果在 5 个 model seeds 下具有稳定方向；
+7. 部署推理时间满足当前控制周期约束。
+
+若 RL 只在 seen 场景改善、在 unseen 随机海流下退化，则保留 Transformer 作为最终部署策略，并将 RL 结果作为探索性实验。若 world model 能改善泛化但 RL 没有稳定增益，则论文主线应改为 world-model-assisted predictive authority，而不是强行以 RL 为主贡献。
+
+## Assumptions
+
+- 当前 v3 正式结果保持不变，所有新实验使用独立输出目录。
+- stepchange 保留，并新增随机有色海流。
+- RL 第一阶段只输出 residual \(\Delta\alpha\)。
+- Transformer 作为部署策略骨干，RL 只作为受约束优化模块。
+- 不在第一轮实验中同时优化 MPC 调用频率、预测时域和 solver budget。
+- 不采用端到端 RL 推进器控制。
+- 不以单一随机种子或 pooled timestep 结果作为主要证据。
