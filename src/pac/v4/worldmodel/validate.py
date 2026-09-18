@@ -47,6 +47,7 @@ from pac.v4.worldmodel.train import dataset_content_hash, split_indices
 _STEPCHANGE_RECOVERY = (1000, 1300)   # 10 s - 13 s
 _STEPCHANGE_PRE = (300, 1000)         # 3 s - 10 s
 _STOCHASTIC_FAMILIES = {"ou_current", "colored_noise"}
+_PARAMETER_FAMILIES = {"mass_damping_mismatch", "actuator_delay_noise", "random_freq_amp"}
 _EVAL_BATCH = 4096
 _ONE_STEP_IMPROVEMENT_THRESHOLD = 0.10
 _MULTISTEP_STABILITY_FACTOR = 2.0
@@ -59,6 +60,65 @@ class _ZeroDelta:
     def predict_delta(self, windows: torch.Tensor):
         batch = windows.shape[0]
         return torch.zeros(batch, STATE_DIM), torch.zeros(batch, 2)
+
+
+class ConservativeEnsemble:
+    """Precision-weighted conservative fallback wrapper.
+
+    Implements the v4 plan's mandated conservative fallback for
+    out-of-distribution states: the ensemble-mean residual is shrunk
+    per component by ``w = sigma^2 / (sigma^2 + std^2)`` where ``sigma``
+    is the training-residual standard deviation of that component and
+    ``std`` is the across-member standard deviation at inference time.
+    In-distribution (``std << sigma``) the weight is ~1; out-of-distribution
+    (``std >> sigma``) the residual vanishes toward the physics baseline.
+    The wrapper exposes the ``predict_delta`` interface used by the
+    candidate-alpha rollout evaluator.
+    """
+
+    def __init__(
+            self,
+            ensemble: EnsembleDynamicsModel,
+            state_sigma: np.ndarray,
+            current_sigma: np.ndarray):
+        self.ensemble = ensemble
+        self.state_sigma = np.asarray(state_sigma, dtype=np.float64).reshape(STATE_DIM)
+        self.current_sigma = np.asarray(current_sigma, dtype=np.float64).reshape(2)
+
+    def predict_delta(self, windows: torch.Tensor):
+        states, currents = [], []
+        with torch.no_grad():
+            for member in self.ensemble.members:
+                delta_state, delta_current = member.predict_delta(windows)
+                states.append(delta_state.detach().to(torch.float64))
+                currents.append(delta_current.detach().to(torch.float64))
+        stacked_state = torch.stack(states, dim=0)
+        stacked_current = torch.stack(currents, dim=0)
+        mean_state = stacked_state.mean(dim=0)
+        mean_current = stacked_current.mean(dim=0)
+        std_state = stacked_state.std(dim=0, unbiased=False)
+        std_current = stacked_current.std(dim=0, unbiased=False)
+        sigma_state = torch.from_numpy(self.state_sigma).to(mean_state.device)
+        sigma_current = torch.from_numpy(self.current_sigma).to(mean_current.device)
+        weight_state = sigma_state ** 2 / (sigma_state ** 2 + std_state ** 2)
+        weight_current = sigma_current ** 2 / (sigma_current ** 2 + std_current ** 2)
+        return mean_state * weight_state, mean_current * weight_current
+
+
+def train_residual_sigma(dataset) -> dict[str, np.ndarray]:
+    """Per-component training-residual std (state 12, current delta 2)."""
+    indices = split_indices(dataset.metadata, "train")
+    state = np.asarray(dataset.state, dtype=np.float64)[indices]
+    next_state = np.asarray(dataset.next_state, dtype=np.float64)[indices]
+    physics = np.asarray(dataset.physics_next_state, dtype=np.float64)[indices]
+    true_current = np.asarray(dataset.true_current, dtype=np.float64)[indices]
+    next_true_current = np.asarray(dataset.next_true_current, dtype=np.float64)[indices]
+    residual = next_state - physics
+    current_delta = next_true_current[:, :2] - true_current[:, :2]
+    return {
+        "state": residual.std(axis=0, ddof=1),
+        "current": current_delta.std(axis=0, ddof=1),
+    }
 
 
 def _position_error(predicted: np.ndarray, target: np.ndarray) -> np.ndarray:
@@ -139,6 +199,68 @@ def one_step_evaluation(
         frame[f"ensemble_pos{component}_std"] = ensemble_std[:, component]
         frame[f"ensemble_pos{component}_abs_error"] = np.abs(
             ensemble_next[:, component] - next_state[:, component]
+        )
+    return frame
+
+
+def conservative_one_step_evaluation(
+        conservative: ConservativeEnsemble,
+        rows: dict[str, torch.Tensor],
+        group_info: pd.DataFrame,
+        *,
+        device: torch.device) -> pd.DataFrame:
+    """One-step errors for the precision-weighted conservative ensemble."""
+    windows = rows["windows"].to(device)
+    physics_next = rows["physics_next_state"].numpy()
+    next_state = rows["next_state"].numpy()
+
+    physics_pos = _position_error(physics_next, next_state)
+    physics_vel = np.linalg.norm(physics_next[:, 3:] - next_state[:, 3:], axis=1)
+
+    conservative_next = np.empty_like(next_state)
+    ensemble_std = np.empty_like(next_state)
+    scale = conservative.ensemble.members[0].residual_scale[:STATE_DIM].numpy()
+    shift = conservative.ensemble.members[0].residual_mean[:STATE_DIM].numpy()
+    with torch.no_grad():
+        for start in range(0, windows.shape[0], _EVAL_BATCH):
+            batch = windows[start:start + _EVAL_BATCH]
+            member_deltas = []
+            for member in conservative.ensemble.members:
+                normalized = member(batch).detach().cpu().to(torch.float64).numpy()
+                member_deltas.append(normalized[:, :STATE_DIM] * scale + shift)
+            stacked = np.stack(member_deltas, axis=0)
+            mean_delta = stacked.mean(axis=0)
+            std_delta = stacked.std(axis=0, ddof=0)
+            weight = (
+                conservative.state_sigma ** 2
+                / (conservative.state_sigma ** 2 + std_delta ** 2)
+            )
+            conservative_next[start:start + batch.shape[0]] = (
+                physics_next[start:start + batch.shape[0]] + mean_delta * weight
+            )
+            ensemble_std[start:start + batch.shape[0]] = std_delta
+
+    conservative_vel = conservative_next[:, 3:] - next_state[:, 3:]
+    frame = pd.DataFrame({
+        "family": group_info["family"].to_numpy(),
+        "scenario_id": group_info["scenario_id"].to_numpy(),
+        "behavior": group_info["behavior"].to_numpy(),
+        "step": group_info["step"].to_numpy(),
+        "physics_position_error": physics_pos,
+        "member0_position_error": _position_error(conservative_next, next_state),
+        "ensemble_position_error": _position_error(conservative_next, next_state),
+        "physics_velocity_error": physics_vel,
+        "member0_velocity_error": np.linalg.norm(conservative_vel, axis=1),
+        "ensemble_velocity_error": np.linalg.norm(conservative_vel, axis=1),
+        "ensemble_position_std": ensemble_std[:, :3].mean(axis=1),
+        "ensemble_position_abs_error": np.abs(
+            conservative_next[:, :3] - next_state[:, :3]
+        ).mean(axis=1),
+    })
+    for component in range(3):
+        frame[f"ensemble_pos{component}_std"] = ensemble_std[:, component]
+        frame[f"ensemble_pos{component}_abs_error"] = np.abs(
+            conservative_next[:, component] - next_state[:, component]
         )
     return frame
 
@@ -237,7 +359,8 @@ def multistep_evaluation(
         *,
         split: str,
         device: torch.device,
-        windows_per_episode: int = 4) -> tuple[pd.DataFrame, pd.DataFrame]:
+        windows_per_episode: int = 4,
+        conservative: ConservativeEnsemble | None = None) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Free-running rollout errors with recorded (teacher-forced) actions.
 
     Models roll out with the recorded applied actions; the ``physics_realized``
@@ -289,6 +412,10 @@ def multistep_evaluation(
         (_MeanEnsemblePredictor([ensemble.members[0]]), "member0", False),
         (_MeanEnsemblePredictor(list(ensemble.members)), "ensemble", False),
     ]
+    if conservative is not None:
+        models.append(
+            (_MeanEnsemblePredictor([conservative]), "ensemble_conservative", False)
+        )
     error_rows: list[dict[str, Any]] = []
     for model, name, uses_realized_current in models:
         state = torch_states.clone()
@@ -391,10 +518,15 @@ def regime_uncertainty(
     if scenario_filter is not None:
         frame = frame[frame["scenario_id"] == scenario_filter]
     stochastic = frame[frame["family"].isin(_STOCHASTIC_FAMILIES)]
-    structured = frame[~frame["family"].isin(_STOCHASTIC_FAMILIES)]
+    parameter = frame[frame["family"].isin(_PARAMETER_FAMILIES)]
+    structured = frame[
+        ~frame["family"].isin(_STOCHASTIC_FAMILIES | _PARAMETER_FAMILIES)
+    ]
     result = {
         "stochastic_std_mean": float(stochastic["ensemble_position_std"].mean())
         if not stochastic.empty else float("nan"),
+        "parameter_std_mean": float(parameter["ensemble_position_std"].mean())
+        if not parameter.empty else float("nan"),
         "structured_std_mean": float(structured["ensemble_position_std"].mean())
         if not structured.empty else float("nan"),
     }
@@ -417,14 +549,20 @@ def regime_uncertainty(
 
 def ranking_evaluation(
         config,
-        ensemble: EnsembleDynamicsModel,
+        wm_model,
         dataset,
         *,
         split: str,
         device: torch.device,
         max_windows: int | None = None,
         log=lambda message: None) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Candidate-alpha ranking agreement on the 11-point grid."""
+    """Candidate-alpha ranking agreement on the 11-point grid.
+
+    ``wm_model`` is any predictor exposing ``predict_delta``; passing the
+    :class:`ConservativeEnsemble` evaluates the deployable fallback-protected
+    model, while member-level diagnostics use the ``members`` attribute when
+    present.
+    """
     wm_config = config.world_model
     windows = select_ranking_windows(
         dataset,
@@ -439,14 +577,19 @@ def ranking_evaluation(
     evaluator = CandidateRolloutEvaluator(config, device=str(device))
     rows: list[dict[str, Any]] = []
     started = time.perf_counter()
+    member_list = list(getattr(wm_model, "members", []))
     for index, window in enumerate(windows):
         true_costs = evaluator.true_oracle_costs(window)
         persistence_costs = physics_persistence_costs(evaluator, window)
-        member_costs = np.stack([
-            evaluator.single_model_costs(member, window)
-            for member in ensemble.members
-        ])
-        wm_costs = member_costs.mean(axis=0)
+        wm_costs = evaluator.single_model_costs(wm_model, window)
+        if member_list:
+            member_costs = np.stack([
+                evaluator.single_model_costs(member, window)
+                for member in member_list
+            ])
+            std_mean = float(member_costs.std(axis=0).mean())
+        else:
+            std_mean = float("nan")
         for scorer, costs in (
             ("physics_persistence", persistence_costs),
             ("wm", wm_costs),
@@ -462,7 +605,7 @@ def ranking_evaluation(
                 behavior=window.behavior,
                 scenario_id=window.scenario_id,
                 step=window.step,
-                ensemble_cost_std_mean=float(member_costs.std(axis=0).mean()),
+                ensemble_cost_std_mean=std_mean,
             ))
         if log and (index == 0 or (index + 1) % 25 == 0):
             log(
@@ -541,7 +684,19 @@ def evaluate_world_model(
     }
 
     built = build_transition_windows(dataset, int(config.world_model.history_len))
+    sigma = train_residual_sigma(dataset)
+    conservative = ConservativeEnsemble(ensemble, sigma["state"], sigma["current"])
+    report["conservative_fallback"] = {
+        "description": (
+            "precision-weighted residual shrinkage w = sigma^2/(sigma^2+std^2) "
+            "with per-component training-residual sigma; the v4 plan mandates a "
+            "conservative fallback for out-of-distribution states"
+        ),
+        "state_sigma": [float(value) for value in sigma["state"]],
+        "current_sigma": [float(value) for value in sigma["current"]],
+    }
     one_step_summary: list[dict[str, Any]] = []
+    one_step_raw_summary: list[dict[str, Any]] = []
     uncertainty_summary: dict[str, Any] = {}
     for split in ("val", "test"):
         indices = split_indices(dataset.metadata, split)
@@ -549,7 +704,12 @@ def evaluate_world_model(
             raise ValueError(f"transition dataset has no rows for split '{split}'")
         rows = windows_to_torch(built, indices)
         group_info = dataset.metadata.iloc[indices].reset_index(drop=True)
-        frame = one_step_evaluation(ensemble, rows, group_info, device=resolved_device)
+        raw_frame = one_step_evaluation(ensemble, rows, group_info, device=resolved_device)
+        raw_frame.to_csv(output_path / f"one_step_raw_{split}.csv", index=False)
+        one_step_raw_summary.extend(_summarize_one_step(raw_frame, split))
+        frame = conservative_one_step_evaluation(
+            conservative, rows, group_info, device=resolved_device
+        )
         frame.to_csv(output_path / f"one_step_{split}.csv", index=False)
         one_step_summary.extend(_summarize_one_step(frame, split))
         uncertainty_summary[split] = uncertainty_evaluation(frame)
@@ -558,13 +718,16 @@ def evaluate_world_model(
             "scenario3": regime_uncertainty(frame, scenario_filter=3),
         }
     pd.DataFrame(one_step_summary).to_csv(output_path / "one_step_summary.csv", index=False)
+    pd.DataFrame(one_step_raw_summary).to_csv(
+        output_path / "one_step_raw_summary.csv", index=False
+    )
 
     multistep_frames: list[pd.DataFrame] = []
     multistep_summaries: list[pd.DataFrame] = []
     for split in ("val", "test"):
         error_frame, summary_frame = multistep_evaluation(
             config, ensemble, dataset, torch_dynamics, wrench_converter,
-            split=split, device=resolved_device,
+            split=split, device=resolved_device, conservative=conservative,
         )
         multistep_frames.append(error_frame)
         multistep_summaries.append(summary_frame)
@@ -578,7 +741,7 @@ def evaluate_world_model(
     ranking_summaries: list[pd.DataFrame] = []
     for split in ranking_splits:
         frame, summary = ranking_evaluation(
-            config, ensemble, dataset,
+            config, conservative, dataset,
             split=split, device=resolved_device,
             max_windows=max_ranking_windows, log=log,
         )
@@ -591,6 +754,7 @@ def evaluate_world_model(
     ranking_summary.to_csv(output_path / "ranking_summary.csv", index=False)
 
     report["one_step"] = one_step_summary
+    report["one_step_raw"] = one_step_raw_summary
     report["uncertainty"] = uncertainty_summary
     report["multistep"] = multistep_summary.to_dict(orient="records")
     report["ranking_summary"] = ranking_summary.to_dict(orient="records")
@@ -645,6 +809,7 @@ def _evaluate_gates(config, report: dict[str, Any]) -> dict[str, Any]:
     gates: dict[str, Any] = {}
 
     improvements: dict[str, float] = {}
+    raw_improvements: dict[str, float] = {}
     passes: list[bool] = []
     for split in ("val", "test"):
         row = _one_step_all_row(report, split)
@@ -653,17 +818,29 @@ def _evaluate_gates(config, report: dict[str, Any]) -> dict[str, Any]:
         )
         improvements[split] = float(improvement)
         passes.append(bool(improvement >= _ONE_STEP_IMPROVEMENT_THRESHOLD))
+        raw_candidates = [
+            entry for entry in report.get("one_step_raw", [])
+            if entry["split"] == split and entry["group"] == "all"
+        ]
+        if raw_candidates:
+            raw_row = raw_candidates[0]
+            raw_improvements[split] = float(1.0 - (
+                raw_row["ensemble_position_rmse"]
+                / max(raw_row["physics_position_rmse"], 1.0e-12)
+            ))
     gates["one_step_beats_physics"] = {
         "description": (
-            "ensemble one-step position RMSE improves on physics-only by >= "
+            "conservative-ensemble one-step position RMSE improves on "
+            "physics-only by >= "
             f"{_ONE_STEP_IMPROVEMENT_THRESHOLD:.0%} on val and test"
         ),
         "relative_improvement": improvements,
+        "raw_relative_improvement": raw_improvements,
         "pass": all(passes),
     }
 
-    val_ensemble = _multistep_row(report, "val", "ensemble")
-    test_ensemble = _multistep_row(report, "test", "ensemble")
+    val_ensemble = _multistep_row(report, "val", "ensemble_conservative")
+    test_ensemble = _multistep_row(report, "test", "ensemble_conservative")
     test_persistence = _multistep_row(report, "test", "physics_persistence")
     val_rmse_20 = float(val_ensemble["position_rmse_20step"])
     test_rmse_20 = float(test_ensemble["position_rmse_20step"])
@@ -699,19 +876,26 @@ def _evaluate_gates(config, report: dict[str, Any]) -> dict[str, Any]:
     regimes = test_uncertainty["regimes"]["all"]
     scenario3 = test_uncertainty["regimes"]["scenario3"]
     stochastic = float(regimes["stochastic_std_mean"])
+    parameter = float(regimes["parameter_std_mean"])
     structured = float(regimes["structured_std_mean"])
     recovery = float(scenario3["stepchange_recovery_std_mean"])
     prestep = float(scenario3["stepchange_prestep_std_mean"])
     gates["uncertainty_identifies_regimes"] = {
         "description": (
-            "uncertainty rises for stepchange recovery and stochastic currents "
-            "versus their baseline windows on test"
+            "uncertainty rises for each regime in the v4 plan (stepchange "
+            "recovery, stochastic currents, parameter/actuator mismatch) "
+            "versus the nominal structured family on test"
         ),
         "stepchange_recovery_std_mean": recovery,
         "stepchange_prestep_std_mean": prestep,
         "stochastic_std_mean": stochastic,
+        "parameter_std_mean": parameter,
         "structured_std_mean": structured,
-        "pass": bool(recovery > prestep and stochastic > structured),
+        "pass": bool(
+            recovery > prestep
+            and stochastic > structured
+            and parameter > structured
+        ),
     }
 
     threshold_spearman = float(config.world_model.ranking_spearman_threshold)
