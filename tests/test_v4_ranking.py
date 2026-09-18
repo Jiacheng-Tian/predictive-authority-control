@@ -2,6 +2,18 @@
 
 from __future__ import annotations
 
+import os
+
+# The collector tests run the online MPC with a wall-time deadline; keep BLAS
+# single-threaded so plan acceptance does not depend on machine load.
+for _thread_var in (
+    "OMP_NUM_THREADS",
+    "OPENBLAS_NUM_THREADS",
+    "MKL_NUM_THREADS",
+    "NUMEXPR_NUM_THREADS",
+):
+    os.environ.setdefault(_thread_var, "1")
+
 import tempfile
 from pathlib import Path
 import unittest
