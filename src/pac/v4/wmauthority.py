@@ -67,8 +67,8 @@ class WMAuthorityComputer:
         position_std = float(np.mean(stacked.std(axis=0, ddof=0)[:3]))
         gate_open = bool(position_std < self.uncertainty_gate)
         best_alpha = float("nan")
-        best_cost = float("nan")
-        spread = float("nan")
+        best_cost = 0.0
+        spread = 0.0
         if gate_open:
             window = RankingWindow(
                 episode_uid="live",

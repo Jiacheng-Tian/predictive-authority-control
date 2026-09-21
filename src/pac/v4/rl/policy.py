@@ -115,10 +115,17 @@ def build_wm_features(advice) -> np.ndarray:
     """
     if advice is None:
         return np.zeros(WM_FEATURE_DIM, dtype=np.float32)
+    # Cost fields can be NaN when the uncertainty gate is closed (no
+    # rollout was run); they are floored to 0 so the features stay finite
+    # while the gate_open flag carries the semantic difference.
+    def _finite(value: float) -> float:
+        number = float(value)
+        return number if np.isfinite(number) else 0.0
+
     values = [
-        np.log1p(max(float(advice.best_cost), 0.0)),
-        np.log1p(max(float(advice.cost_spread), 0.0)),
-        np.log10(1.0 + max(float(advice.uncertainty), 0.0)),
+        np.log1p(max(_finite(advice.best_cost), 0.0)),
+        np.log1p(max(_finite(advice.cost_spread), 0.0)),
+        np.log10(1.0 + max(_finite(advice.uncertainty), 0.0)),
         1.0 if bool(advice.gate_open) else 0.0,
         1.0,
     ]

@@ -55,7 +55,12 @@ class LiveResidualPolicy:
         delta = float(np.clip(delta, -self.policy.delta_max, self.policy.delta_max))
         self.last_base = base
         self.last_delta = delta
-        return float(np.clip(base + self.policy.lambda_blend * delta, 0.0, 1.0))
+        raw = base + self.policy.lambda_blend * delta
+        if not np.isfinite(raw):
+            # Defensive fallback: any numerical failure in the head must
+            # degrade to the frozen backbone behavior, never to NaN.
+            raw = base
+        return float(np.clip(raw, 0.0, 1.0))
 
 
 class TransitionRecorder:
