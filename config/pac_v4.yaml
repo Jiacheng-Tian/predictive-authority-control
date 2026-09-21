@@ -168,7 +168,10 @@ wm_authority:
   # Below the gate the world-model grid alpha is trusted; above it the
   # policy falls back to the frozen Transformer alpha.
   uncertainty_gate: 1.5e-6
-  refresh_steps: 10
+  # Measured cost of one conservative 11-candidate x 20-step rollout is
+  # ~168 ms on the reference CPU; refresh every 20 steps amortizes to
+  # ~8.4 ms/step, inside the 10 ms control period.
+  refresh_steps: 20
 
 collection:
   behavior_constant_alphas: [0.0, 0.5, 1.0]

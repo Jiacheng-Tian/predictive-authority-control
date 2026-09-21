@@ -237,13 +237,14 @@ class V4RunnerBehaviorTests(unittest.TestCase):
         metrics = run_v4_policy_episode(
             ConstantAlphaPolicy(0.2), spec, self.config, wm_computer=computer
         )
-        # refresh every 10 steps over 61 decision steps (0..60)
-        expected_calls = len([s for s in range(61) if s % 10 == 0])
+        # refresh every wm_authority.refresh_steps decision steps (0..60)
+        refresh = int(self.config.wm_authority.refresh_steps)
+        expected_calls = len([s for s in range(61) if s % refresh == 0])
         self.assertEqual(computer.calls, expected_calls)
         self.assertGreater(metrics["wm_gate_open_fraction"], 0.0)
         gate_flags = metrics["ts"]["wm_gate_open"].to_numpy()
         flagged = np.flatnonzero(gate_flags > 0)
-        self.assertTrue(all(int(step) % 10 == 0 for step in flagged))
+        self.assertTrue(all(int(step) % refresh == 0 for step in flagged))
 
 
 if __name__ == "__main__":

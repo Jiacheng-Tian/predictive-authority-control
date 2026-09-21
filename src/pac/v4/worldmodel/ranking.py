@@ -234,6 +234,12 @@ class CandidateRolloutEvaluator:
         self.primary = build_controller(config.controller.primary)[1]
         self.primary.set_trajectory3d(True)
         self.device = torch.device(device)
+        from pac.v4.batched import BatchedSMC
+
+        self.batched_smc = BatchedSMC(self.primary)
+        self._allocation = np.asarray(self.layout.allocation_matrix, dtype=float)
+        self._allocation_t = np.ascontiguousarray(self._allocation.T)
+        self._max_force = float(self.layout.max_force)
 
     # -- shared rollout plumbing ------------------------------------------
     def _target_at(self, stamp: float) -> np.ndarray:
@@ -299,69 +305,77 @@ class CandidateRolloutEvaluator:
         return self._single_model_rollout(model, window)
 
     def _single_model_rollout(self, model: Any, window: RankingWindow) -> np.ndarray:
+        """Batched candidate rollout: one vectorized SMC call, vectorized
+        actuator/blend/tracking, and torch RK4 physics per step."""
+        from pac.v4.batched import batched_actuator_apply
+
         settings = self.settings
         alphas = np.asarray(settings.alpha_grid, dtype=float)
         candidate_count = alphas.size
         t0 = float(window.sample_time)
-        state = torch.tensor(
-            np.repeat(window.initial_state[None, :], candidate_count, axis=0),
-            dtype=torch.float64,
+        state_np = np.repeat(
+            np.asarray(window.initial_state, dtype=float)[None, :], candidate_count, axis=0
         )
-        est_current = np.asarray(window.est_current, dtype=float)
-        current_forecast = np.repeat(est_current[None, :], candidate_count, axis=0)
-        actuators = [SharedActuator(self.limits) for _ in range(candidate_count)]
-        for actuator in actuators:
-            actuator._previous_applied = np.asarray(window.previous_applied, dtype=float).copy()
-        window_tensor = torch.tensor(window.window[None, :, :], dtype=torch.float32)
-        window_tensor = window_tensor.repeat(candidate_count, 1, 1)
+        current_forecast = np.repeat(
+            np.asarray(window.est_current, dtype=float)[None, :], candidate_count, axis=0
+        )
+        previous_applied = np.repeat(
+            np.asarray(window.previous_applied, dtype=float)[None, :], candidate_count, axis=0
+        )
+        window_tensor = torch.tensor(
+            np.repeat(np.asarray(window.window)[None, :, :], candidate_count, axis=0),
+            dtype=torch.float32,
+        )
         costs = np.zeros(candidate_count, dtype=float)
-        plans = np.repeat(window.plan[None, :, :], candidate_count, axis=0)
+        plans = np.repeat(
+            np.asarray(window.plan, dtype=float)[None, :, :], candidate_count, axis=0
+        )
+        context = np.asarray(window.context, dtype=float)
+        scenario_id = window.scenario_id
+        xy_weight = float(settings.xy_weight)
+        z_weight = float(settings.z_weight)
+        heading_weight = float(settings.heading_weight)
 
         for step in range(settings.horizon):
             stamp = t0 + step * self.dt
             target = self._target_at(stamp)
             next_target = self._target_at(stamp + self.dt)
-            eta_numpy = state[:, :6].numpy()
-            nu_numpy = state[:, 6:].numpy()
-            primary_actions = np.stack([
-                compute_controller_action(
-                    self.primary, "real10kg_smc_steady", target,
-                    eta_numpy[index], nu_numpy[index], stamp, self.dt, current_forecast[index],
-                )
-                for index in range(candidate_count)
-            ])
-            requested = (1.0 - alphas)[:, None] * primary_actions \
-                + alphas[:, None] * plans[:, min(step, plans.shape[1] - 1)]
-            requested = np.clip(requested, -1.0, 1.0)
-            applied = np.stack([
-                actuators[index].apply(requested[index]).applied for index in range(candidate_count)
-            ])
-            previous_for_delta = np.stack([
-                actuators[index]._previous_applied.copy() for index in range(candidate_count)
-            ])
-            deltas = applied - previous_for_delta
+            primary_actions = self.batched_smc.compute_batch(
+                target, state_np[:, :6], state_np[:, 6:], stamp, current_forecast
+            )
+            plan_step = plans[:, min(step, plans.shape[1] - 1)]
+            requested = np.clip(
+                (1.0 - alphas)[:, None] * primary_actions
+                + alphas[:, None] * plan_step,
+                -1.0, 1.0,
+            )
+            applied, _amplitude = batched_actuator_apply(
+                requested, previous_applied,
+                command_min=self.limits.command_min,
+                command_max=self.limits.command_max,
+                max_delta_per_step=self.limits.max_delta_per_step,
+            )
+            deltas = applied - previous_applied
             saturation = np.mean((requested - applied) ** 2, axis=1)
             if self.limits.max_delta_per_step is not None:
                 saturation += np.mean(
                     np.maximum(
-                        np.abs(applied - previous_for_delta) - self.limits.max_delta_per_step,
-                        0.0,
+                        np.abs(deltas) - self.limits.max_delta_per_step, 0.0
                     ) ** 2,
                     axis=1,
                 )
-            wrench = np.stack([self._to_wrench(applied[index]) for index in range(candidate_count)])
+            previous_applied = applied.copy()
+            wrench = (applied * self._max_force) @ self._allocation_t
             physics_eta, physics_nu = self.torch_dynamics.predict_step(
-                state[:, :6], state[:, 6:], torch.tensor(wrench),
+                torch.tensor(state_np[:, :6]),
+                torch.tensor(state_np[:, 6:]),
+                torch.tensor(wrench),
                 torch.tensor(current_forecast),
             )
             features = np.stack([
                 assemble_wm_feature(
-                    state[index].numpy(),
-                    requested[index],
-                    applied[index],
-                    current_forecast[index],
-                    window.context,
-                    window.scenario_id,
+                    state_np[index], requested[index], applied[index],
+                    current_forecast[index], context, scenario_id,
                 )
                 for index in range(candidate_count)
             ])
@@ -371,28 +385,30 @@ class CandidateRolloutEvaluator:
             ], dim=1)
             with torch.no_grad():
                 delta_state, delta_current = model.predict_delta(window_tensor)
-            delta_state = delta_state.to(torch.float64)
-            delta_current = delta_current.to(torch.float64)
-            eta_next = physics_eta + delta_state[:, :6]
-            nu_next = physics_nu + delta_state[:, 6:]
-            state = torch.cat([eta_next, nu_next], dim=1)
+            eta_next = physics_eta.numpy() + delta_state.numpy()[:, :6]
+            nu_next = physics_nu.numpy() + delta_state.numpy()[:, 6:]
+            state_np = np.concatenate([eta_next, nu_next], axis=1)
             current_forecast = current_forecast.copy()
             current_forecast[:, :2] += delta_current.numpy()
-            tracking = np.array([
-                _tracking_cost(settings, next_target, eta_next[index].numpy())
-                for index in range(candidate_count)
-            ])
+            error = next_target[None, :] - eta_next
+            yaw_error = (error[:, 5] + np.pi) % (2.0 * np.pi) - np.pi
+            tracking = (
+                xy_weight * (error[:, 0] ** 2 + error[:, 1] ** 2)
+                + z_weight * error[:, 2] ** 2
+                + heading_weight * yaw_error ** 2
+            )
             costs += tracking
             costs += settings.control_delta_weight * np.mean(deltas ** 2, axis=1)
             costs += settings.saturation_weight * saturation
-        costs += settings.terminal_scale * np.array([
-            _tracking_cost(
-                settings,
-                self._target_at(t0 + settings.horizon * self.dt),
-                state[index, :6].numpy(),
-            )
-            for index in range(candidate_count)
-        ])
+        terminal_target = self._target_at(t0 + settings.horizon * self.dt)
+        terminal_error = terminal_target[None, :] - state_np[:, :6]
+        terminal_yaw = (terminal_error[:, 5] + np.pi) % (2.0 * np.pi) - np.pi
+        terminal = (
+            xy_weight * (terminal_error[:, 0] ** 2 + terminal_error[:, 1] ** 2)
+            + z_weight * terminal_error[:, 2] ** 2
+            + heading_weight * terminal_yaw ** 2
+        )
+        costs += settings.terminal_scale * terminal
         return costs
 
 
