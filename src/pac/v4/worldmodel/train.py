@@ -201,9 +201,21 @@ def train_world_model(
         output_dir: str | Path,
         *,
         device: str = "cpu",
+        physics_baseline: str = "physics",
         log=lambda message: None) -> dict[str, Any]:
-    """Train the configured ensemble and persist the checkpoint atomically."""
+    """Train the configured ensemble and persist the checkpoint atomically.
+
+    ``physics_baseline="zero"`` trains the capacity-matched pure-learning
+    control: the stored physics prediction is zeroed in memory so the
+    residual target becomes the full next state.  The checkpoint's
+    ``config_hash`` is domain-separated from the physics+residual model so
+    the two cannot be confused at load time.
+    """
+    if physics_baseline not in ("physics", "zero"):
+        raise ValueError("physics_baseline must be 'physics' or 'zero'")
     dataset = load_transition_dataset(dataset_dir)
+    if physics_baseline == "zero":
+        dataset.physics_next_state[:, :] = 0.0
     dataset_hash = dataset_content_hash(dataset_dir)
     wm = config.world_model
     resolved_device = torch.device(device)
@@ -256,20 +268,26 @@ def train_world_model(
         )
     ensemble = EnsembleDynamicsModel(members, member_seeds)
 
+    config_hash = _config_content_hash(config)
+    if physics_baseline == "zero":
+        config_hash = hashlib.sha256(
+            (config_hash + "|zero_physics_baseline").encode("utf-8")
+        ).hexdigest()
     output_path = Path(output_dir) / "world_model.pt"
     payload = save_world_model(
         output_path,
         ensemble,
         dataset_hash=dataset_hash,
         member_training_metrics=member_metrics,
-        config_hash=_config_content_hash(config),
-        validation_metrics={},
+        config_hash=config_hash,
+        validation_metrics={"physics_baseline": physics_baseline},
     )
     summary = {
         "protocol_version": WM_PROTOCOL_VERSION,
         "dataset_dir": str(dataset_dir),
         "dataset_hash": dataset_hash,
         "checkpoint_path": str(output_path),
+        "physics_baseline": physics_baseline,
         "members": int(wm.members),
         "member_seeds": member_seeds,
         "member_metrics": member_metrics,

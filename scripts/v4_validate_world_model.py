@@ -55,6 +55,9 @@ def main(argv: list[str] | None = None) -> int:
         log=lambda message: print(message, file=sys.stderr, flush=True),
     )
     gates = report["gates"]
+    if "note" in gates:
+        print(json.dumps(gates, sort_keys=True))
+        return 0
     print(json.dumps(nan_to_none({
         name: {
             "pass": value["pass"],

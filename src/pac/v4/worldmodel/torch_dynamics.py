@@ -160,4 +160,23 @@ def assert_torch_physics_parity(
     return float(np.max(np.abs(numpy_next - torch_next))), tolerance
 
 
-__all__ = ["TorchAUVDynamics", "assert_torch_physics_parity"]
+class ZeroTorchDynamics:
+    """Zero next-state predictor for the pure-learning capacity control.
+
+    When the physics baseline is removed, the residual target becomes the
+    full next state; rollouts under this "dynamics" propagate the learned
+    delta alone so the pure model is evaluated on its own merits.
+    """
+
+    def __init__(self, dt: float = 0.01):
+        self.dt = float(dt)
+
+    def predict_step(self, eta, nu, tau, current):
+        eta = torch.as_tensor(eta)
+        nu = torch.as_tensor(nu)
+        return torch.zeros_like(eta, dtype=eta.dtype), torch.zeros_like(
+            nu, dtype=nu.dtype
+        )
+
+
+__all__ = ["TorchAUVDynamics", "ZeroTorchDynamics", "assert_torch_physics_parity"]

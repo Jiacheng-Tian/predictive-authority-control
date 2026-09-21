@@ -40,7 +40,7 @@ from pac.v4.worldmodel.ranking import (
     ranking_row,
     select_ranking_windows,
 )
-from pac.v4.worldmodel.torch_dynamics import TorchAUVDynamics
+from pac.v4.worldmodel.torch_dynamics import TorchAUVDynamics, ZeroTorchDynamics
 from pac.v4.collector import load_transition_dataset
 from pac.v4.worldmodel.train import dataset_content_hash, split_indices
 
@@ -60,6 +60,25 @@ class _ZeroDelta:
     def predict_delta(self, windows: torch.Tensor):
         batch = windows.shape[0]
         return torch.zeros(batch, STATE_DIM), torch.zeros(batch, 2)
+
+
+class CurrentOnlyModel:
+    """Mechanism-decomposition scorer: zero state residual, keep the
+    ensemble current forecast.
+
+    Isolates the current-forecast pathway of the world model: rollout costs
+    use physics plus the predicted current increment only.  Together with
+    the physics-persistence and full-residual scorers this yields the
+    physics / +current-forecast / +state-residual decomposition table.
+    """
+
+    def __init__(self, wm_model):
+        self.wm_model = wm_model
+
+    def predict_delta(self, windows: torch.Tensor):
+        with torch.no_grad():
+            _delta_state, delta_current = self.wm_model.predict_delta(windows)
+        return torch.zeros_like(delta_current[:, :STATE_DIM]), delta_current
 
 
 class ConservativeEnsemble:
@@ -575,6 +594,7 @@ def ranking_evaluation(
         step = max(1, len(windows) // int(max_windows))
         windows = windows[::step][: int(max_windows)]
     evaluator = CandidateRolloutEvaluator(config, device=str(device))
+    current_only_model = CurrentOnlyModel(wm_model)
     rows: list[dict[str, Any]] = []
     started = time.perf_counter()
     member_list = list(getattr(wm_model, "members", []))
@@ -582,6 +602,9 @@ def ranking_evaluation(
         true_costs = evaluator.true_oracle_costs(window)
         persistence_costs = physics_persistence_costs(evaluator, window)
         wm_costs = evaluator.single_model_costs(wm_model, window)
+        current_only_costs = evaluator.single_model_costs(
+            current_only_model, window
+        )
         if member_list:
             member_costs = np.stack([
                 evaluator.single_model_costs(member, window)
@@ -592,6 +615,7 @@ def ranking_evaluation(
             std_mean = float("nan")
         for scorer, costs in (
             ("physics_persistence", persistence_costs),
+            ("wm_current_only", current_only_costs),
             ("wm", wm_costs),
         ):
             result = RankingResult(
@@ -646,23 +670,38 @@ def evaluate_world_model(
         device: str = "cpu",
         ranking_splits: tuple[str, ...] = ("val", "test"),
         max_ranking_windows: int | None = None,
+        physics_baseline: str = "physics",
         log=lambda message: None) -> dict[str, Any]:
-    """Run every stage-1 metric and write the acceptance report."""
+    """Run every stage-1 metric and write the acceptance report.
+
+    ``physics_baseline="zero"`` evaluates the pure-learning capacity
+    control: stored physics predictions are zeroed, multistep rollouts use
+    :class:`ZeroTorchDynamics`, the ranking evaluation is skipped (the
+    decomposition table covers the ranking mechanism), and gates are
+    reported descriptively rather than as acceptance verdicts.
+    """
+    if physics_baseline not in ("physics", "zero"):
+        raise ValueError("physics_baseline must be 'physics' or 'zero'")
     resolved_device = torch.device(device)
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
     dataset = load_transition_dataset(dataset_dir)
+    if physics_baseline == "zero":
+        dataset.physics_next_state[:, :] = 0.0
     dataset_hash = dataset_content_hash(dataset_dir)
     ensemble, checkpoint_metadata = load_world_model(
         checkpoint_path, expected_dataset_hash=dataset_hash
     )
     ensemble.eval()
 
-    torch_dynamics = TorchAUVDynamics(
-        vehicle_profile=config.environment.vehicle_profile,
-        dt=float(config.environment.dt),
-        device=resolved_device,
-    )
+    if physics_baseline == "zero":
+        torch_dynamics = ZeroTorchDynamics(dt=float(config.environment.dt))
+    else:
+        torch_dynamics = TorchAUVDynamics(
+            vehicle_profile=config.environment.vehicle_profile,
+            dt=float(config.environment.dt),
+            device=resolved_device,
+        )
     layout = None
     from pac.simulation.thrusters import build_thruster_layout
 
@@ -739,18 +778,32 @@ def evaluate_world_model(
 
     ranking_frames: list[pd.DataFrame] = []
     ranking_summaries: list[pd.DataFrame] = []
-    for split in ranking_splits:
-        frame, summary = ranking_evaluation(
-            config, conservative, dataset,
-            split=split, device=resolved_device,
-            max_windows=max_ranking_windows, log=log,
+    if physics_baseline == "zero":
+        log(
+            "[wm-validate] physics_baseline=zero: skipping ranking "
+            "(decomposition table covers the ranking mechanism)"
         )
-        ranking_frames.append(frame)
-        ranking_summaries.append(summary)
-    pd.concat(ranking_frames, ignore_index=True).to_csv(
-        output_path / "ranking_windows.csv", index=False
-    )
-    ranking_summary = pd.concat(ranking_summaries, ignore_index=True)
+        ranking_summary = pd.DataFrame(
+            columns=["split", "scorer", "note"]
+        )
+    else:
+        for split in ranking_splits:
+            frame, summary = ranking_evaluation(
+                config, conservative, dataset,
+                split=split, device=resolved_device,
+                max_windows=max_ranking_windows, log=log,
+            )
+            ranking_frames.append(frame)
+            ranking_summaries.append(summary)
+        if ranking_frames:
+            pd.concat(ranking_frames, ignore_index=True).to_csv(
+                output_path / "ranking_windows.csv", index=False
+            )
+        ranking_summary = (
+            pd.concat(ranking_summaries, ignore_index=True)
+            if ranking_summaries
+            else pd.DataFrame(columns=["split", "scorer"])
+        )
     ranking_summary.to_csv(output_path / "ranking_summary.csv", index=False)
 
     report["one_step"] = one_step_summary
@@ -758,7 +811,16 @@ def evaluate_world_model(
     report["uncertainty"] = uncertainty_summary
     report["multistep"] = multistep_summary.to_dict(orient="records")
     report["ranking_summary"] = ranking_summary.to_dict(orient="records")
-    report["gates"] = _evaluate_gates(config, report)
+    if physics_baseline == "zero":
+        report["gates"] = {
+            "note": (
+                "capacity-control run: gates are not acceptance verdicts "
+                "for the zero-physics baseline; compare one-step and "
+                "multistep tables against the physics+residual model"
+            )
+        }
+    else:
+        report["gates"] = _evaluate_gates(config, report)
 
     (output_path / "gate_report.json").write_text(
         json.dumps(nan_to_none(report), indent=2, sort_keys=True, allow_nan=False),

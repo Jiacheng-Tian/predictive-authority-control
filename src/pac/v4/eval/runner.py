@@ -193,8 +193,16 @@ def run_v4_policy_episode(
         config,
         *,
         wm_computer=None,
-        save_ts: bool = True) -> dict[str, Any]:
-    """Run one paired v4 episode and return v3-compatible metrics."""
+        save_ts: bool = True,
+        transition_sink=None) -> dict[str, Any]:
+    """Run one paired v4 episode and return v3-compatible metrics.
+
+    ``transition_sink(context, step_info, next_state, alpha)`` — optional
+    per-step callback invoked after the environment step for RL training
+    collection; it receives the pre-step decision context, the simulator
+    info dict, the post-step state ``[eta, nu]``, and the applied (filtered)
+    alpha.
+    """
     env_config = config.environment
     environment = make_v4_simulator(
         spec,
@@ -443,6 +451,16 @@ def run_v4_policy_episode(
                 context_base,
                 environment.scenario,
             ))
+        if transition_sink is not None:
+            transition_sink(
+                context,
+                step_info,
+                np.concatenate([
+                    np.asarray(dynamics.eta, dtype=float),
+                    np.asarray(dynamics.nu, dtype=float),
+                ]),
+                float(alpha),
+            )
         previous_alpha = float(alpha)
         previous_applied = applied.copy()
 

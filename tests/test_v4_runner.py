@@ -32,8 +32,11 @@ PARITY_SEED = 41234
 PARITY_STEPS = 400
 FIXED_STEPS = 300
 # Wall-clock-dependent solver metrics cannot be reproduced across runs;
-# parity tests assert them loosely instead of exactly.
+# parity tests assert them loosely instead of exactly.  The tolerance is
+# generous because concurrent training jobs load the machine and swing the
+# online MPC deadline-miss fraction between the two rollouts.
 _TIMING_METRICS = {"solver_deadline_miss_step_fraction", "solver_fallback_step_fraction"}
+_TIMING_TOLERANCE = 0.15
 
 
 def _float_metrics(metrics: dict) -> dict[str, float]:
@@ -54,7 +57,7 @@ def _assert_paired_metrics(test: unittest.TestCase, v3_metrics, v4_metrics) -> N
         if key in _TIMING_METRICS:
             test.assertLessEqual(
                 abs(actual - expected),
-                0.05,
+                _TIMING_TOLERANCE,
                 f"timing metric {key} diverged beyond tolerance",
             )
             continue
