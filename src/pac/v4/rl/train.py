@@ -217,6 +217,7 @@ def train_residual_rl(
             "device": str(resolved_device),
         },
     )
+    summary["checkpoint_path"] = str(checkpoint_path)
     (output / f"training_summary_seed_{int(model_seed)}.json").write_text(
         json.dumps(summary, indent=2, sort_keys=True, default=str),
         encoding="utf-8",
