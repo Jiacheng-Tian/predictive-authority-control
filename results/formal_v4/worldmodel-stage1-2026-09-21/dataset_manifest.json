@@ -1,0 +1,81 @@
+{
+  "dependency_versions": {
+    "numpy": "2.4.4",
+    "osqp": "1.1.3",
+    "pandas": "3.0.2",
+    "scipy": "1.17.1",
+    "torch": "2.12.0.dev20260408+cu128"
+  },
+  "feature_dim": 32,
+  "file_sha256": {
+    "metadata.csv": "f8179e5cd3b1302ec76e3e953e05e5b76697196dfa179b387a492e5d97cbce2f",
+    "transitions.npz": "39cfe4206884f5c244300844e55c7596a8d6beb8729ca28999e24425cfcab269"
+  },
+  "git_commit": "dbe78c6e38fd0e0c90ab616d6e82c52d3cb91adb",
+  "plan_horizon": 20,
+  "profile": "formal",
+  "protocol_version": "predictive_authority_v4",
+  "provenance": {
+    "episodes": 640,
+    "profile": "formal",
+    "protocol_version": "predictive_authority_v4",
+    "seed_partitions": {
+      "wm_test": [
+        23000,
+        23001,
+        23002,
+        23003,
+        23004,
+        23005,
+        23006,
+        23007,
+        23008,
+        23009
+      ],
+      "wm_train": [
+        21000,
+        21001,
+        21002,
+        21003,
+        21004,
+        21005,
+        21006,
+        21007
+      ],
+      "wm_val": [
+        22000,
+        22001
+      ]
+    }
+  },
+  "sample_count": 1344000,
+  "schema_version": 1,
+  "seed_partitions": {
+    "wm_test": [
+      23000,
+      23001,
+      23002,
+      23003,
+      23004,
+      23005,
+      23006,
+      23007,
+      23008,
+      23009
+    ],
+    "wm_train": [
+      21000,
+      21001,
+      21002,
+      21003,
+      21004,
+      21005,
+      21006,
+      21007
+    ],
+    "wm_val": [
+      22000,
+      22001
+    ]
+  }
+}

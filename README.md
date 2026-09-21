@@ -30,6 +30,22 @@ PAC/predictive_alpha lowers `rmse_3d` by `0.00760 m` with model-seed t(4) CI
 All reported results are obtained in a 6-DOF AUV simulation. PAC blends an
 explicit SMC primary controller with an MPC authority controller.
 
+## v4 simulation-only world-model evidence (stage one)
+
+The v4 stage-one evidence is frozen at
+`results/formal_v4/worldmodel-stage1-2026-09-21`. It covers the physics +
+residual world model: a formal transition dataset (640 episodes,
+1,344,000 transitions over five stochastic disturbance families plus the
+three structured scenarios, with train/val/test seed partitions disjoint
+from v3), a 5-member residual ensemble, the precision-weighted conservative
+fallback, and the five pre-registered stage-1 acceptance gates. Four gates
+pass; the one-step-versus-physics threshold gate fails on magnitude with
+micron-scale absolute errors while the decision-relevant candidate-alpha
+ranking gate passes (test Spearman 0.936, top-1 0.811, matching the
+physics+persistence control at 0.944/0.818). The dataset bodies
+(transitions.npz, metadata.csv) stay outside git, hash-pinned in
+`dataset_manifest.json`; per-row validation CSVs are tracked via Git LFS.
+
 ## Quick Start
 
 ```powershell

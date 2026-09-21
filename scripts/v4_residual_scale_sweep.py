@@ -26,7 +26,7 @@ from pac.v4.worldmodel.ranking import (
     select_ranking_windows,
 )
 from pac.v4.worldmodel.train import dataset_content_hash, split_indices
-from pac.v4.worldmodel.validate import _summarize_one_step, one_step_evaluation
+from pac.v4.worldmodel.validate import one_step_evaluation
 
 
 class ScaledEnsemble:
