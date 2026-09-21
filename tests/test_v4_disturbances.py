@@ -155,6 +155,49 @@ class V4DisturbanceTests(unittest.TestCase):
         self.assertIsInstance(delayed["delay_steps"], int)
         self.assertTrue(2 <= delayed["delay_steps"] <= 4)
 
+    def test_fast_ou_is_ou_dynamics_with_extrapolated_params(self):
+        from pac.v4.disturbances import build_v4_episode_spec, make_v4_simulator
+
+        params = {"theta": 4.5, "sigma": 0.4, "mean_scale": 0.3}
+        spec = build_v4_episode_spec(
+            "fast_ou", 2, 515001, STEPS, 0.01, disturbance_params=params
+        )
+        simulator = make_v4_simulator(spec)
+        simulator.reset(episode_spec=spec)
+        currents = []
+        for step_index in range(60):
+            simulator.step(np.zeros(6))
+            currents.append(simulator.current_at_step(step_index).copy())
+        array = np.stack(currents)
+        self.assertTrue(np.isfinite(array).all())
+        # theta=4.5 (time constant ~0.22 s) decorrelates the process well
+        # within a 0.6 s window.
+        lag0 = float(np.corrcoef(array[:-10, 0], array[:-10, 0])[0, 1])
+        lag10 = float(np.corrcoef(array[:-10, 0], array[10:, 0])[0, 1])
+        self.assertLess(lag10, 0.9 * lag0 + 0.1)
+
+    def test_estimation_delay_overrides_spec_estimator(self):
+        from pac.v4.disturbances import build_v4_episode_spec, make_v4_simulator
+
+        params = {"delay_steps": 15, "noise_std": 0.08}
+        spec = build_v4_episode_spec(
+            "estimation_delay", 2, 515002, STEPS, 0.01, disturbance_params=params
+        )
+        self.assertEqual(spec.current_delay_steps, 15)
+        self.assertAlmostEqual(spec.current_noise_std, 0.08)
+        self.assertEqual(spec.family, "estimation_delay")
+        simulator = make_v4_simulator(spec)
+        simulator.reset(episode_spec=spec)
+        # Structured (sinusoidal) currents: family must not alter dynamics.
+        base = _simulator("structured", {}, seed=515002, scenario=2)[0]
+        for _ in range(30):
+            simulator.step(np.zeros(6))
+            base.step(np.zeros(6))
+        np.testing.assert_allclose(
+            simulator.realized_current_trajectory, base.realized_current_trajectory,
+            atol=1.0e-12,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

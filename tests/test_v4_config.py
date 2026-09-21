@@ -26,7 +26,8 @@ class V4ConfigTests(unittest.TestCase):
         self.assertEqual(config.world_model.history_len, 16)
         self.assertIn("ou_current", config.disturbances.families)
         partitions = seed_partitions(config)
-        self.assertEqual(len(partitions), 6)
+        self.assertEqual(len(partitions), 7)
+        self.assertIn("sspo_search", partitions)
 
     def test_environment_seeds_disjoint_from_v3(self):
         from pac.v4.config import load_v4_config

@@ -123,6 +123,24 @@ disturbances:
     test:
       delay_steps: [6, 10]
       action_noise_std: [0.04, 0.08]
+  # Evaluation-only families: never used for collection or training.  fast_ou
+  # shares the OU process dynamics with sharply faster parameters;
+  # estimation_delay keeps sinusoidal currents but degrades the causal
+  # current estimator (delay + noise), stressing current-forecast-based
+  # authorities.  Both exist to test unseen generalization where the
+  # physics+persistence control is expected to fail.
+  eval_only:
+    fast_ou:
+      base_scenario: 2
+      test:
+        theta: [3.0, 6.0]
+        sigma: [0.3, 0.5]
+        mean_scale: [0.0, 0.5]
+    estimation_delay:
+      base_scenario: 2
+      test:
+        delay_steps: [10, 20]
+        noise_std: [0.05, 0.1]
 
 seeds:
   wm_train: [21000, 21001, 21002, 21003, 21004, 21005, 21006, 21007]
@@ -131,6 +149,26 @@ seeds:
   eval_seen: [42000, 42001, 42002, 42003, 42004, 42005, 42006, 42007, 42008, 42009, 42010, 42011, 42012, 42013, 42014, 42015, 42016, 42017, 42018, 42019]
   eval_unseen: [43000, 43001, 43002, 43003, 43004, 43005, 43006, 43007, 43008, 43009, 43010, 43011, 43012, 43013, 43014, 43015, 43016, 43017, 43018, 43019]
   model: [31000, 31001, 31002, 31003, 31004]
+  sspo_search: [44000, 44001, 44002, 44003, 44004]
+
+evaluation:
+  # Paired evaluation grid: structured scenarios use every eval_seen seed;
+  # disturbance families use the first family_seed_count seeds of their
+  # block (train-range families from eval_seen, test-range + eval-only
+  # families from eval_unseen).
+  family_seed_count: 5
+
+sspo:
+  bias_grid: [-0.05, 0.0, 0.1, 0.2, 0.3]
+  iterations: 1
+
+wm_authority:
+  # Calibrated from the stage-one ensemble-std distribution: structured
+  # 3.85e-7 < gate 1.5e-6 ~ stochastic 1.3e-6 << parameter-mismatch 5.7e-6.
+  # Below the gate the world-model grid alpha is trusted; above it the
+  # policy falls back to the frozen Transformer alpha.
+  uncertainty_gate: 1.5e-6
+  refresh_steps: 10
 
 collection:
   behavior_constant_alphas: [0.0, 0.5, 1.0]
@@ -147,6 +185,9 @@ reward:
   w_saturation: 0.1
   w_deadline: 0.02
   w_constraint: 10.0
+  # Explicit normalization scales, frozen before any RL training.
+  position_scale_m: 0.1
+  heading_scale_rad: 0.05
 
 rl:
   algorithm: td3
@@ -167,6 +208,9 @@ rl:
   warmup_steps: 2000
   updates_per_step: 1
   max_steps_per_round: 200000
+  # Warm-start replay transitions drawn from the frozen stage-one dataset;
+  # fixed before training and recorded in every checkpoint manifest.
+  warmstart_transitions: 200000
 
 backbone:
   checkpoint_dir: runs/train-v3-formal-baseline

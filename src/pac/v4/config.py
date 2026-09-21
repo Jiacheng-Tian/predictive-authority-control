@@ -44,6 +44,8 @@ _PARAMETER_FAMILIES = (
     "random_freq_amp",
     "mass_damping_mismatch",
     "actuator_delay_noise",
+    "fast_ou",
+    "estimation_delay",
 )
 _DISTURBANCE_PARAMS = {
     "ou_current": ("theta", "sigma", "mean_scale"),
@@ -51,6 +53,8 @@ _DISTURBANCE_PARAMS = {
     "random_freq_amp": ("amplitude_scale", "frequency_scale"),
     "mass_damping_mismatch": ("mass_scale_xy", "damping_scale_xy"),
     "actuator_delay_noise": ("delay_steps", "action_noise_std"),
+    "fast_ou": ("theta", "sigma", "mean_scale"),
+    "estimation_delay": ("delay_steps", "noise_std"),
 }
 _FLOAT_PARAMS = {
     "theta",
@@ -62,6 +66,7 @@ _FLOAT_PARAMS = {
     "mass_scale_xy",
     "damping_scale_xy",
     "action_noise_std",
+    "noise_std",
 }
 
 
@@ -103,8 +108,11 @@ class DisturbancesConfig:
     families: tuple[str, ...]
     base_scenario: dict[str, int]
     families_config: dict[str, DisturbanceFamilyConfig]
+    eval_only: dict[str, DisturbanceFamilyConfig]
 
     def profile_ranges(self, family: str, profile: str) -> dict[str, DisturbanceRange]:
+        if family in self.eval_only:
+            return self.eval_only[family].ranges[profile]
         return self.families_config[family].ranges[profile]
 
 
@@ -116,6 +124,25 @@ class SeedsConfig:
     eval_seen: tuple[int, ...]
     eval_unseen: tuple[int, ...]
     model: tuple[int, ...]
+    sspo_search: tuple[int, ...]
+
+
+@dataclass(frozen=True)
+class EvaluationV4Config:
+    family_seed_count: int
+
+
+@dataclass(frozen=True)
+class SSPOV4Config:
+    search_seeds: tuple[int, ...]
+    bias_grid: tuple[float, ...]
+    iterations: int
+
+
+@dataclass(frozen=True)
+class WMAuthorityConfig:
+    uncertainty_gate: float
+    refresh_steps: int
 
 
 @dataclass(frozen=True)
@@ -136,6 +163,8 @@ class RewardConfig:
     w_saturation: float
     w_deadline: float
     w_constraint: float
+    position_scale_m: float
+    heading_scale_rad: float
 
 
 @dataclass(frozen=True)
@@ -158,6 +187,7 @@ class RLConfig:
     warmup_steps: int
     updates_per_step: int
     max_steps_per_round: int
+    warmstart_transitions: int
 
 
 @dataclass(frozen=True)
@@ -182,6 +212,9 @@ class V4ExperimentConfig:
     world_model: WorldModelConfig
     disturbances: DisturbancesConfig
     seeds: SeedsConfig
+    evaluation: EvaluationV4Config
+    sspo: SSPOV4Config
+    wm_authority: WMAuthorityConfig
     collection: CollectionConfig
     reward: RewardConfig
     rl: RLConfig
@@ -198,12 +231,17 @@ def _float_range(section: dict[str, Any], name: str) -> DisturbanceRange:
     return DisturbanceRange(low=values[0], high=values[1])
 
 
-def _load_family(name: str, data: Any, default_scenario: int) -> DisturbanceFamilyConfig:
+def _load_family(
+        name: str,
+        data: Any,
+        default_scenario: int,
+        *,
+        profiles: tuple[str, ...] = _V4_PROFILE_RANGES) -> DisturbanceFamilyConfig:
     if not isinstance(data, dict):
         raise ValueError(f"disturbance family {name} must be a mapping")
     params = _DISTURBANCE_PARAMS[name]
     ranges: dict[str, dict[str, DisturbanceRange]] = {}
-    for profile in _V4_PROFILE_RANGES:
+    for profile in profiles:
         profile_section = _section(data, profile)
         profile_ranges: dict[str, DisturbanceRange] = {}
         for parameter in params:
@@ -258,10 +296,27 @@ def _load_disturbances(data: dict[str, Any]) -> DisturbancesConfig:
         family: _load_family(family, _section(section, family), base_scenario[family])
         for family in families
     }
+    eval_only_section = section.get("eval_only", {})
+    if not isinstance(eval_only_section, dict):
+        raise ValueError("disturbances.eval_only must be a mapping")
+    eval_only: dict[str, DisturbanceFamilyConfig] = {}
+    for family, family_data in eval_only_section.items():
+        if family not in _PARAMETER_FAMILIES:
+            raise ValueError(f"unknown eval_only disturbance family: {family}")
+        if family in families:
+            raise ValueError(f"eval_only family {family} duplicates a collected family")
+        raw_scenario = eval_only_section.get(family, {}).get("base_scenario", 2)
+        scenario = _int_value(raw_scenario, f"eval_only.{family}.base_scenario")
+        if scenario not in (1, 2, 3):
+            raise ValueError(f"eval_only.{family}.base_scenario must be one of 1, 2, 3")
+        eval_only[family] = _load_family(
+            str(family), family_data, scenario, profiles=("test",)
+        )
     return DisturbancesConfig(
         families=families,
         base_scenario=base_scenario,
         families_config=families_config,
+        eval_only=eval_only,
     )
 
 
@@ -333,6 +388,7 @@ def _load_seeds(data: dict[str, Any]) -> SeedsConfig:
         eval_seen=_int_tuple(_required(section, "eval_seen"), "eval_seen"),
         eval_unseen=_int_tuple(_required(section, "eval_unseen"), "eval_unseen"),
         model=_int_tuple(_required(section, "model"), "model"),
+        sspo_search=_int_tuple(_required(section, "sspo_search"), "sspo_search"),
     )
     for seeds in (
         config.wm_train,
@@ -341,6 +397,7 @@ def _load_seeds(data: dict[str, Any]) -> SeedsConfig:
         config.eval_seen,
         config.eval_unseen,
         config.model,
+        config.sspo_search,
     ):
         for seed in seeds:
             if seed < 0 or seed > 2**64 - 1:
@@ -388,7 +445,20 @@ def _load_reward(data: dict[str, Any]) -> RewardConfig:
         raise ValueError("reward.w_position must be positive")
     if weights["w_constraint"] <= 0.0:
         raise ValueError("reward.w_constraint must be positive")
-    return RewardConfig(version=_non_empty_string(_required(section, "version"), "reward.version"), **weights)
+    position_scale = _float_value(
+        _required(section, "position_scale_m"), "reward.position_scale_m"
+    )
+    heading_scale = _float_value(
+        _required(section, "heading_scale_rad"), "reward.heading_scale_rad"
+    )
+    if position_scale <= 0.0 or heading_scale <= 0.0:
+        raise ValueError("reward normalization scales must be positive")
+    return RewardConfig(
+        version=_non_empty_string(_required(section, "version"), "reward.version"),
+        **weights,
+        position_scale_m=position_scale,
+        heading_scale_rad=heading_scale,
+    )
 
 
 def _load_rl(data: dict[str, Any]) -> RLConfig:
@@ -423,6 +493,9 @@ def _load_rl(data: dict[str, Any]) -> RLConfig:
         max_steps_per_round=_int_value(
             _required(section, "max_steps_per_round"), "rl.max_steps_per_round"
         ),
+        warmstart_transitions=_int_value(
+            _required(section, "warmstart_transitions"), "rl.warmstart_transitions"
+        ),
     )
     if not 0.0 < config.delta_max <= 1.0:
         raise ValueError("rl.delta_max must be in (0, 1]")
@@ -440,6 +513,8 @@ def _load_rl(data: dict[str, Any]) -> RLConfig:
         raise ValueError("rl noise values must be non-negative")
     if config.updates_per_step <= 0 or config.max_steps_per_round <= 0:
         raise ValueError("rl update budgets must be positive")
+    if config.warmstart_transitions < 0:
+        raise ValueError("rl.warmstart_transitions must be non-negative")
     return config
 
 
@@ -475,6 +550,57 @@ def load_v4_config(path: str | Path) -> V4ExperimentConfig:
     reward = _load_reward(data)
     rl = _load_rl(data)
 
+    evaluation_data = _section(data, "evaluation")
+    family_seed_count = _int_value(
+        _required(evaluation_data, "family_seed_count"),
+        "evaluation.family_seed_count",
+    )
+    if family_seed_count <= 0:
+        raise ValueError("evaluation.family_seed_count must be positive")
+    if (family_seed_count > len(seeds.eval_seen)
+            or family_seed_count > len(seeds.eval_unseen)):
+        raise ValueError(
+            "evaluation.family_seed_count exceeds the eval seed partitions"
+        )
+    evaluation = EvaluationV4Config(family_seed_count=family_seed_count)
+
+    sspo_data = _section(data, "sspo")
+    bias_grid = _float_sequence(
+        _required(sspo_data, "bias_grid"), "sspo.bias_grid"
+    )
+    if len(bias_grid) < 2 or any(
+        right <= left for left, right in zip(bias_grid, bias_grid[1:])
+    ):
+        raise ValueError("sspo.bias_grid must be strictly increasing")
+    sspo_iterations = _int_value(
+        _required(sspo_data, "iterations"), "sspo.iterations"
+    )
+    if sspo_iterations <= 0:
+        raise ValueError("sspo.iterations must be positive")
+    sspo = SSPOV4Config(
+        search_seeds=seeds.sspo_search,
+        bias_grid=bias_grid,
+        iterations=sspo_iterations,
+    )
+
+    wm_authority_data = _section(data, "wm_authority")
+    uncertainty_gate = _float_value(
+        _required(wm_authority_data, "uncertainty_gate"),
+        "wm_authority.uncertainty_gate",
+    )
+    refresh_steps = _int_value(
+        _required(wm_authority_data, "refresh_steps"),
+        "wm_authority.refresh_steps",
+    )
+    if uncertainty_gate <= 0.0:
+        raise ValueError("wm_authority.uncertainty_gate must be positive")
+    if refresh_steps <= 0:
+        raise ValueError("wm_authority.refresh_steps must be positive")
+    wm_authority = WMAuthorityConfig(
+        uncertainty_gate=uncertainty_gate,
+        refresh_steps=refresh_steps,
+    )
+
     backbone_data = _section(data, "backbone")
     outputs_data = _section(data, "outputs")
     config = V4ExperimentConfig(
@@ -488,6 +614,9 @@ def load_v4_config(path: str | Path) -> V4ExperimentConfig:
         world_model=world_model,
         disturbances=disturbances,
         seeds=seeds,
+        evaluation=evaluation,
+        sspo=sspo,
+        wm_authority=wm_authority,
         collection=collection,
         reward=reward,
         rl=rl,
@@ -514,6 +643,7 @@ def seed_partitions(config: V4ExperimentConfig) -> dict[str, tuple[int, ...]]:
         "eval_seen": config.seeds.eval_seen,
         "eval_unseen": config.seeds.eval_unseen,
         "model": config.seeds.model,
+        "sspo_search": config.seeds.sspo_search,
     }
 
 
@@ -533,7 +663,8 @@ def _validate_v3_partition_disjointness(config: V4ExperimentConfig) -> None:
     v3_environment_seeds: set[int] = set()
     for partition in _V3_SEED_PARTITIONS:
         v3_environment_seeds.update(partition)
-    for role in ("wm_train", "wm_val", "wm_test", "eval_seen", "eval_unseen"):
+    for role in ("wm_train", "wm_val", "wm_test", "eval_seen", "eval_unseen",
+                 "sspo_search"):
         for seed in getattr(config.seeds, role):
             if seed in v3_environment_seeds:
                 raise ValueError(

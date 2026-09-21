@@ -24,7 +24,14 @@ DISTURBANCE_FAMILIES = (
     "random_freq_amp",
     "mass_damping_mismatch",
     "actuator_delay_noise",
+    "fast_ou",
 )
+# Evaluation-only families: fast_ou shares the OU simulator dynamics with
+# extrapolated parameters; estimation_delay keeps structured (sinusoidal)
+# currents and only degrades the causal current estimator through the
+# episode spec's delay/noise fields.
+EVAL_ONLY_FAMILIES = ("fast_ou", "estimation_delay")
+_KNOWN_FAMILIES = (STRUCTURED_FAMILY, *DISTURBANCE_FAMILIES, *EVAL_ONLY_FAMILIES)
 _FLOAT_PARAMS = {
     "theta",
     "sigma",
@@ -35,6 +42,7 @@ _FLOAT_PARAMS = {
     "mass_scale_xy",
     "damping_scale_xy",
     "action_noise_std",
+    "noise_std",
 }
 _INT_PARAMS = {"delay_steps"}
 _MAX_SEED = 2**64 - 1
@@ -56,7 +64,7 @@ def draw_disturbance_params(
     parameters (``delay_steps``) are drawn uniformly over the inclusive
     integer interval; float parameters are drawn uniformly over the interval.
     """
-    if family not in DISTURBANCE_FAMILIES:
+    if family not in _KNOWN_FAMILIES:
         raise ValueError(f"unknown disturbance family: {family}")
     if isinstance(episode_seed, (bool, np.bool_)) or not isinstance(episode_seed, (int, np.integer)):
         raise ValueError("episode_seed must be an integer")
@@ -78,7 +86,8 @@ def draw_disturbance_params(
             params[name] = int(rng.integers(low_i, high_i + 1))
         else:
             raise ValueError(f"unknown disturbance parameter: {family}.{name}")
-    missing = {"theta", "sigma", "mean_scale"} - set(params) if family == "ou_current" else set()
+    missing = {"theta", "sigma", "mean_scale"} - set(params) if family in (
+        "ou_current", "fast_ou") else set()
     if family == "colored_noise" and not {"rho", "sigma"} <= set(params):
         missing = {"rho", "sigma"}
     if missing:
@@ -110,7 +119,7 @@ class V4EpisodeSpec:
     episode_uid: str | None = None
 
     def __post_init__(self) -> None:
-        if self.family not in (STRUCTURED_FAMILY, *DISTURBANCE_FAMILIES):
+        if self.family not in _KNOWN_FAMILIES:
             raise ValueError(f"unknown v4 disturbance family: {self.family}")
         if isinstance(self.scenario_id, (bool, np.bool_)) or not isinstance(
                 self.scenario_id, (int, np.integer)):
@@ -198,7 +207,7 @@ def build_v4_episode_spec(
     frozen v3 ``build_episode_spec`` so that structured v4 episodes and v3
     episodes from the same seed share initial conditions.
     """
-    if family not in (STRUCTURED_FAMILY, *DISTURBANCE_FAMILIES):
+    if family not in _KNOWN_FAMILIES:
         raise ValueError(f"unknown v4 disturbance family: {family}")
     seed = int(episode_seed)
     if isinstance(episode_seed, (bool, np.bool_)) or not isinstance(episode_seed, (int, np.integer)):
@@ -215,6 +224,12 @@ def build_v4_episode_spec(
     initial_nu[:3] = rng.normal(0.0, 0.01, size=3)
     noise = rng.normal(0.0, float(current_noise_std), size=(step_count, 3))
     params = dict(disturbance_params) if disturbance_params is not None else {}
+    if family == "estimation_delay":
+        # The estimation_delay family keeps structured currents and only
+        # degrades the causal estimator: its drawn parameters override the
+        # spec-level delay and noise fields.
+        current_delay_steps = int(params.get("delay_steps", current_delay_steps))
+        current_noise_std = float(params.get("noise_std", current_noise_std))
     return V4EpisodeSpec(
         family=family,
         scenario_id=int(scenario_id),
@@ -250,7 +265,7 @@ class V4Simulator(AUVSimulator):
             disturbance_params: Mapping[str, float | int] | None = None,
             disturbance_seed: int | None = None,
             **kwargs: Any):
-        if family not in (STRUCTURED_FAMILY, *DISTURBANCE_FAMILIES):
+        if family not in _KNOWN_FAMILIES:
             raise ValueError(f"unknown v4 disturbance family: {family}")
         self.family = family
         params = dict(disturbance_params or {})
@@ -318,13 +333,13 @@ class V4Simulator(AUVSimulator):
         return self._ar_state.copy()
 
     def _generate_current(self, t):
-        if self.family not in ("ou_current", "colored_noise"):
+        if self.family not in ("ou_current", "fast_ou", "colored_noise"):
             return super()._generate_current(t)
         # Stochastic currents advance exactly once per simulation step so that
         # pre-step measurements and the dynamics see the same realization.
         needed = int(self.current_step) + 1
         if self._process_cache_id != needed:
-            if self.family == "ou_current":
+            if self.family in ("ou_current", "fast_ou"):
                 value = self._advance_ou_current()
             else:
                 value = self._advance_colored_current()
