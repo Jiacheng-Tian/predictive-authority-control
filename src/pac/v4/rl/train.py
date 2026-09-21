@@ -187,7 +187,9 @@ def train_residual_rl(
 
     import pandas as pd
 
-    pd.DataFrame(history_rows).to_csv(output / "training_history.csv", index=False)
+    pd.DataFrame(history_rows).to_csv(
+        output / f"training_history_seed_{int(model_seed)}.csv", index=False
+    )
     checkpoint_path = output / f"residual_rl_seed_{int(model_seed)}_round{round_index}.pt"
     summary = save_rl_checkpoint(
         checkpoint_path,
