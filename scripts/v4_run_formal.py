@@ -5,10 +5,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
+
+for _var in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
+             "NUMEXPR_NUM_THREADS"):
+    os.environ.setdefault(_var, "1")
 
 from pac.v4.eval.formal import run_v4_formal  # noqa: E402
 
@@ -24,6 +29,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--profile", default="dry", choices=["dry", "short", "formal"])
     parser.add_argument("--run-id", default=None)
     parser.add_argument("--include-wm-rl", action="store_true")
+    parser.add_argument("--wm-rl-dir", default=None)
+    parser.add_argument("--jobs", type=int, default=1)
     parser.add_argument("--progress-every", type=int, default=10)
     return parser
 
@@ -40,6 +47,8 @@ def main(argv: list[str] | None = None) -> int:
         profile=arguments.profile,
         run_id=arguments.run_id,
         include_wm_rl=arguments.include_wm_rl,
+        wm_rl_dir=arguments.wm_rl_dir,
+        jobs=arguments.jobs,
         progress_every=arguments.progress_every,
         log=lambda message: print(message, file=sys.stderr, flush=True),
     )

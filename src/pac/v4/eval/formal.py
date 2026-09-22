@@ -161,11 +161,13 @@ def method_grid(config, *, include_wm_rl: bool) -> list[dict]:
 class MethodFactory:
     """Lazily built, cached policy instances shared across episodes."""
 
-    def __init__(self, config, *, rl_dir: Path | None, wm_checkpoint: Path | None,
+    def __init__(self, config, *, rl_dir: Path | None, wm_rl_dir: Path | None,
+                 wm_checkpoint: Path | None,
                  dataset_dir: Path | None, sspo_schedule: dict | None,
                  include_wm_rl: bool):
         self.config = config
         self.rl_dir = rl_dir
+        self.wm_rl_dir = wm_rl_dir or rl_dir
         self.wm_checkpoint = wm_checkpoint
         self.dataset_dir = dataset_dir
         self.sspo_schedule = sspo_schedule
@@ -227,7 +229,10 @@ class MethodFactory:
             name = (
                 f"residual_rl_seed_{int(model_seed)}_round{round_index}.pt"
             )
-            checkpoint = self.rl_dir / name
+            source_dir = (
+                self.wm_rl_dir if method == "wm_residual_rl" else self.rl_dir
+            )
+            checkpoint = source_dir / name
             policy, _metadata = load_rl_checkpoint(
                 checkpoint, backbone=backbone, expected_model_seed=int(model_seed)
             )
@@ -368,6 +373,37 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+_WORKER_STATE: dict[str, Any] = {}
+
+
+def _worker_initialize(arguments) -> None:
+    (config_path, rl_dir, wm_rl_dir, wm_checkpoint, dataset_dir,
+     sspo_schedule, include_wm_rl) = arguments
+    import torch
+
+    torch.set_num_threads(1)
+    config = load_v4_config(config_path)
+    _WORKER_STATE["config"] = config
+    _WORKER_STATE["factory"] = MethodFactory(
+        config,
+        rl_dir=Path(rl_dir),
+        wm_rl_dir=Path(wm_rl_dir),
+        wm_checkpoint=Path(wm_checkpoint),
+        dataset_dir=Path(dataset_dir),
+        sspo_schedule=dict(sspo_schedule),
+        include_wm_rl=include_wm_rl,
+    )
+    _WORKER_STATE["combos"] = method_grid(config, include_wm_rl=include_wm_rl)
+
+
+def _worker_run_task(task: EpisodeTask) -> list[dict[str, Any]]:
+    config = _WORKER_STATE["config"]
+    spec = build_task_spec(config, task)
+    return run_task_methods(
+        config, _WORKER_STATE["factory"], task, spec, _WORKER_STATE["combos"]
+    )
+
+
 def run_v4_formal(
         *,
         config_path: str | Path,
@@ -379,6 +415,8 @@ def run_v4_formal(
         profile: str,
         run_id: str | None = None,
         include_wm_rl: bool = False,
+        wm_rl_dir: str | Path | None = None,
+        jobs: int = 1,
         progress_every: int = 0,
         log: Callable[[str], None] = lambda message: None) -> Path | dict[str, Any]:
     """Run the paired formal v4 grid; returns the run directory."""
@@ -406,14 +444,7 @@ def run_v4_formal(
                 "config": str(config_path), "output_root": str(output_root)}
 
     sspo_schedule = json.loads(sspo_schedule_path.read_text(encoding="utf-8"))
-    factory = MethodFactory(
-        config,
-        rl_dir=rl_dir,
-        wm_checkpoint=wm_checkpoint,
-        dataset_dir=dataset_dir,
-        sspo_schedule=sspo_schedule,
-        include_wm_rl=include_wm_rl,
-    )
+    resolved_wm_rl_dir = Path(wm_rl_dir).resolve() if wm_rl_dir else rl_dir
     if run_id is None or not str(run_id).strip():
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         run_id = f"{stamp}-{os.getpid()}"
@@ -428,15 +459,48 @@ def run_v4_formal(
         rows: list[dict[str, Any]] = []
         completed = 0
         total = plan["rollouts"]
-        for task in tasks:
-            spec = build_task_spec(config, task)
-            task_rows = run_task_methods(config, factory, task, spec, combos)
-            rows.extend(task_rows)
-            completed += len(combos)
-            if progress_every and (
-                    completed <= progress_every or completed % progress_every == 0
-            ):
-                log(f"[formal-v4] {completed}/{total} episode={spec.episode_uid}")
+        if jobs > 1:
+            import multiprocessing as mp
+
+            context = mp.get_context("spawn")
+            initializer_arguments = (
+                str(config_path), str(rl_dir), str(resolved_wm_rl_dir),
+                str(wm_checkpoint), str(dataset_dir), sspo_schedule,
+                include_wm_rl,
+            )
+            with context.Pool(
+                    processes=int(jobs),
+                    initializer=_worker_initialize,
+                    initargs=[initializer_arguments],
+            ) as pool:
+                for task_rows in pool.imap_unordered(_worker_run_task, tasks):
+                    rows.extend(task_rows)
+                    completed += len(combos)
+                    if progress_every and (
+                            completed <= progress_every * len(combos)
+                            or completed % (progress_every * len(combos)) == 0
+                    ):
+                        log(f"[formal-v4] {completed}/{total} rollouts")
+        else:
+            factory = MethodFactory(
+                config,
+                rl_dir=rl_dir,
+                wm_rl_dir=resolved_wm_rl_dir,
+                wm_checkpoint=wm_checkpoint,
+                dataset_dir=dataset_dir,
+                sspo_schedule=sspo_schedule,
+                include_wm_rl=include_wm_rl,
+            )
+            for task in tasks:
+                spec = build_task_spec(config, task)
+                task_rows = run_task_methods(config, factory, task, spec, combos)
+                rows.extend(task_rows)
+                completed += len(combos)
+                if progress_every and (
+                        completed <= progress_every * len(combos)
+                        or completed % (progress_every * len(combos)) == 0
+                ):
+                    log(f"[formal-v4] {completed}/{total} episode={spec.episode_uid}")
         raw = pd.DataFrame(rows)
         raw.to_csv(temporary / "raw_metrics.csv", index=False)
         overall = _aggregate(raw)
@@ -460,12 +524,13 @@ def run_v4_formal(
         (temporary / "formal_summary.json").write_text(
             json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8"
         )
-        checkpoint_hashes = {
-            f"rl/seed_{seed}": _sha256(
-                rl_dir / f"residual_rl_seed_{seed}_round1.pt"
-            )
-            for seed in config.seeds.model
-        } if rl_dir.is_dir() else {}
+        checkpoint_hashes = {}
+        for label, directory in (("rl", rl_dir), ("wm_rl", resolved_wm_rl_dir)):
+            if directory.is_dir():
+                for seed in config.seeds.model:
+                    checkpoint_hashes[f"{label}/seed_{seed}"] = _sha256(
+                        directory / f"residual_rl_seed_{seed}_round1.pt"
+                    )
         manifest = {
             "protocol_version": config.protocol.version,
             "profile": profile,
