@@ -136,6 +136,40 @@ def train_residual_rl(
     episode_index = 0
     episode_rewards: list[float] = []
     started = time.perf_counter()
+    partial_path = output / f"partial_seed_{int(model_seed)}.pt"
+    if partial_path.exists():
+        state = torch.load(partial_path, map_location="cpu", weights_only=True)
+        policy.load_state_dict(state["policy"])
+        trainer.critic.load_state_dict(state["critic"])
+        trainer.critic_target.load_state_dict(state["critic_target"])
+        trainer.actor_opt.load_state_dict(state["actor_opt"])
+        trainer.critic_opt.load_state_dict(state["critic_opt"])
+        trainer.policy_target.load_state_dict(state["policy_target"])
+        trainer.update_count = int(state["update_count"])
+        episode_index = int(state["episode_index"])
+        env_steps = int(state["env_steps"])
+        updates = int(state["updates"])
+        log(
+            f"[rl-train seed={model_seed}] resumed partial checkpoint at "
+            f"episode={episode_index} env_steps={env_steps}"
+        )
+
+    def save_partial() -> None:
+        temporary = partial_path.with_suffix(".tmp")
+        torch.save({
+            "policy": policy.state_dict(),
+            "policy_target": trainer.policy_target.state_dict(),
+            "critic": trainer.critic.state_dict(),
+            "critic_target": trainer.critic_target.state_dict(),
+            "actor_opt": trainer.actor_opt.state_dict(),
+            "critic_opt": trainer.critic_opt.state_dict(),
+            "update_count": trainer.update_count,
+            "episode_index": episode_index,
+            "env_steps": env_steps,
+            "updates": updates,
+        }, temporary)
+        temporary.replace(partial_path)
+
     while env_steps < total_steps:
         plan = training_episode_plan(config, episode_index)
         spec = build_v4_spec_for_plan(config, plan)
@@ -184,6 +218,8 @@ def train_residual_rl(
                 f"elapsed={history_rows[-1]['elapsed_s']:.0f}s"
             )
         episode_index += 1
+        if episode_index % 20 == 0:
+            save_partial()
 
     import pandas as pd
 

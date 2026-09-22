@@ -5,10 +5,23 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 import sys
 
+# Pin every numeric library to one thread per process: five training
+# processes each defaulting to all-core torch/BLAS threads oversubscribe
+# the CPU for hours and have triggered hardware-corrected errors (WHEA 17)
+# followed by an automatic reboot on this machine.
+for _var in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
+             "NUMEXPR_NUM_THREADS"):
+    os.environ.setdefault(_var, "1")
+
 ROOT = Path(__file__).resolve().parents[1]
+
+import torch  # noqa: E402
+
+torch.set_num_threads(1)
 
 from pac.v4.config import load_v4_config  # noqa: E402
 from pac.v4.rl.train import train_residual_rl  # noqa: E402
