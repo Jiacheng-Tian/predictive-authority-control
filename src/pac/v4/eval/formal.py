@@ -164,7 +164,8 @@ class MethodFactory:
     def __init__(self, config, *, rl_dir: Path | None, wm_rl_dir: Path | None,
                  wm_checkpoint: Path | None,
                  dataset_dir: Path | None, sspo_schedule: dict | None,
-                 include_wm_rl: bool):
+                 include_wm_rl: bool, wm_sigma: dict | None = None):
+        self.wm_sigma = wm_sigma
         self.config = config
         self.rl_dir = rl_dir
         self.wm_rl_dir = wm_rl_dir or rl_dir
@@ -183,6 +184,7 @@ class MethodFactory:
                 self.config,
                 self.wm_checkpoint,
                 self.dataset_dir,
+                sigma=self.wm_sigma,
                 device="cpu",
             )
         return self._wm_computer
@@ -378,7 +380,7 @@ _WORKER_STATE: dict[str, Any] = {}
 
 def _worker_initialize(arguments) -> None:
     (config_path, rl_dir, wm_rl_dir, wm_checkpoint, dataset_dir,
-     sspo_schedule, include_wm_rl) = arguments
+     sspo_schedule, include_wm_rl, wm_sigma) = arguments
     import torch
 
     torch.set_num_threads(1)
@@ -392,6 +394,7 @@ def _worker_initialize(arguments) -> None:
         dataset_dir=Path(dataset_dir),
         sspo_schedule=dict(sspo_schedule),
         include_wm_rl=include_wm_rl,
+        wm_sigma=wm_sigma,
     )
     _WORKER_STATE["combos"] = method_grid(config, include_wm_rl=include_wm_rl)
 
@@ -445,6 +448,12 @@ def run_v4_formal(
 
     sspo_schedule = json.loads(sspo_schedule_path.read_text(encoding="utf-8"))
     resolved_wm_rl_dir = Path(wm_rl_dir).resolve() if wm_rl_dir else rl_dir
+    # Compute the conservative-fallback sigmas once in the parent: loading
+    # the multi-GB transition dataset in every worker exhausted RAM.
+    from pac.v4.collector import load_transition_dataset
+    from pac.v4.worldmodel.validate import train_residual_sigma
+
+    wm_sigma = train_residual_sigma(load_transition_dataset(dataset_dir))
     if run_id is None or not str(run_id).strip():
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         run_id = f"{stamp}-{os.getpid()}"
@@ -466,7 +475,7 @@ def run_v4_formal(
             initializer_arguments = (
                 str(config_path), str(rl_dir), str(resolved_wm_rl_dir),
                 str(wm_checkpoint), str(dataset_dir), sspo_schedule,
-                include_wm_rl,
+                include_wm_rl, wm_sigma,
             )
             with context.Pool(
                     processes=int(jobs),
@@ -490,6 +499,7 @@ def run_v4_formal(
                 dataset_dir=dataset_dir,
                 sspo_schedule=sspo_schedule,
                 include_wm_rl=include_wm_rl,
+                wm_sigma=wm_sigma,
             )
             for task in tasks:
                 spec = build_task_spec(config, task)

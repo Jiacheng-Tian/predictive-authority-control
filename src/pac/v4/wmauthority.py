@@ -140,18 +140,25 @@ def build_wm_authority_computer(
         wm_checkpoint,
         dataset_dir,
         *,
+        sigma: dict | None = None,
         device: str | torch.device = "cpu") -> tuple[WMAuthorityComputer, str]:
-    """Assemble the computer from a frozen stage-one checkpoint."""
+    """Assemble the computer from a frozen stage-one checkpoint.
+
+    ``sigma`` may carry precomputed per-component training-residual stds so
+    callers that spawn many workers compute it once instead of loading the
+    multi-GB dataset per process.
+    """
     resolved = torch.device(device)
     dataset_hash = dataset_content_hash(dataset_dir)
     ensemble, metadata = load_world_model(
         wm_checkpoint, expected_dataset_hash=dataset_hash
     )
     ensemble.eval()
-    from pac.v4.collector import load_transition_dataset
+    if sigma is None:
+        from pac.v4.collector import load_transition_dataset
 
-    dataset = load_transition_dataset(dataset_dir)
-    sigma = train_residual_sigma(dataset)
+        dataset = load_transition_dataset(dataset_dir)
+        sigma = train_residual_sigma(dataset)
     conservative = ConservativeEnsemble(ensemble, sigma["state"], sigma["current"])
     evaluator = CandidateRolloutEvaluator(config, device=str(resolved))
     computer = WMAuthorityComputer(
