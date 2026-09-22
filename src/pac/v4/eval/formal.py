@@ -477,6 +477,7 @@ def run_v4_formal(
                 str(wm_checkpoint), str(dataset_dir), sspo_schedule,
                 include_wm_rl, wm_sigma,
             )
+            partial_rows_path = temporary / "partial_rows.jsonl"
             with context.Pool(
                     processes=int(jobs),
                     initializer=_worker_initialize,
@@ -484,6 +485,11 @@ def run_v4_formal(
             ) as pool:
                 for task_rows in pool.imap_unordered(_worker_run_task, tasks):
                     rows.extend(task_rows)
+                    # Incremental persistence: a crash or OOM kill costs at
+                    # most the in-flight tasks, never the whole grid.
+                    with partial_rows_path.open("a", encoding="utf-8") as stream:
+                        for row in task_rows:
+                            stream.write(json.dumps(row, sort_keys=True) + chr(10))
                     completed += len(combos)
                     if progress_every and (
                             completed <= progress_every * len(combos)
