@@ -1,0 +1,480 @@
+{
+  "config_path": "config\\pac_v4.yaml",
+  "config_sha256": "e07dbfa0d62640a4e161eb1b4b61b81e2240e58dc9863562a246f56a5cb15812",
+  "dataset_dir": "runs\\predictive_authority_v4\\wm-dataset-formal-v2",
+  "episode_grid": [
+    {
+      "block": "seen",
+      "environment_seed": 42000,
+      "family": "ou_current",
+      "profile": "train",
+      "scenario_id": 2
+    },
+    {
+      "block": "seen",
+      "environment_seed": 42001,
+      "family": "ou_current",
+      "profile": "train",
+      "scenario_id": 2
+    },
+    {
+      "block": "seen",
+      "environment_seed": 42002,
+      "family": "ou_current",
+      "profile": "train",
+      "scenario_id": 2
+    },
+    {
+      "block": "seen",
+      "environment_seed": 42003,
+      "family": "ou_current",
+      "profile": "train",
+      "scenario_id": 2
+    },
+    {
+      "block": "seen",
+      "environment_seed": 42004,
+      "family": "ou_current",
+      "profile": "train",
+      "scenario_id": 2
+    },
+    {
+      "block": "seen",
+      "environment_seed": 42000,
+      "family": "colored_noise",
+      "profile": "train",
+      "scenario_id": 2
+    },
+    {
+      "block": "seen",
+      "environment_seed": 42001,
+      "family": "colored_noise",
+      "profile": "train",
+      "scenario_id": 2
+    },
+    {
+      "block": "seen",
+      "environment_seed": 42002,
+      "family": "colored_noise",
+      "profile": "train",
+      "scenario_id": 2
+    },
+    {
+      "block": "seen",
+      "environment_seed": 42003,
+      "family": "colored_noise",
+      "profile": "train",
+      "scenario_id": 2
+    },
+    {
+      "block": "seen",
+      "environment_seed": 42004,
+      "family": "colored_noise",
+      "profile": "train",
+      "scenario_id": 2
+    },
+    {
+      "block": "seen",
+      "environment_seed": 42000,
+      "family": "random_freq_amp",
+      "profile": "train",
+      "scenario_id": 2
+    },
+    {
+      "block": "seen",
+      "environment_seed": 42001,
+      "family": "random_freq_amp",
+      "profile": "train",
+      "scenario_id": 2
+    },
+    {
+      "block": "seen",
+      "environment_seed": 42002,
+      "family": "random_freq_amp",
+      "profile": "train",
+      "scenario_id": 2
+    },
+    {
+      "block": "seen",
+      "environment_seed": 42003,
+      "family": "random_freq_amp",
+      "profile": "train",
+      "scenario_id": 2
+    },
+    {
+      "block": "seen",
+      "environment_seed": 42004,
+      "family": "random_freq_amp",
+      "profile": "train",
+      "scenario_id": 2
+    },
+    {
+      "block": "seen",
+      "environment_seed": 42000,
+      "family": "mass_damping_mismatch",
+      "profile": "train",
+      "scenario_id": 2
+    },
+    {
+      "block": "seen",
+      "environment_seed": 42001,
+      "family": "mass_damping_mismatch",
+      "profile": "train",
+      "scenario_id": 2
+    },
+    {
+      "block": "seen",
+      "environment_seed": 42002,
+      "family": "mass_damping_mismatch",
+      "profile": "train",
+      "scenario_id": 2
+    },
+    {
+      "block": "seen",
+      "environment_seed": 42003,
+      "family": "mass_damping_mismatch",
+      "profile": "train",
+      "scenario_id": 2
+    },
+    {
+      "block": "seen",
+      "environment_seed": 42004,
+      "family": "mass_damping_mismatch",
+      "profile": "train",
+      "scenario_id": 2
+    },
+    {
+      "block": "seen",
+      "environment_seed": 42000,
+      "family": "actuator_delay_noise",
+      "profile": "train",
+      "scenario_id": 3
+    },
+    {
+      "block": "seen",
+      "environment_seed": 42001,
+      "family": "actuator_delay_noise",
+      "profile": "train",
+      "scenario_id": 3
+    },
+    {
+      "block": "seen",
+      "environment_seed": 42002,
+      "family": "actuator_delay_noise",
+      "profile": "train",
+      "scenario_id": 3
+    },
+    {
+      "block": "seen",
+      "environment_seed": 42003,
+      "family": "actuator_delay_noise",
+      "profile": "train",
+      "scenario_id": 3
+    },
+    {
+      "block": "seen",
+      "environment_seed": 42004,
+      "family": "actuator_delay_noise",
+      "profile": "train",
+      "scenario_id": 3
+    },
+    {
+      "block": "unseen",
+      "environment_seed": 43000,
+      "family": "ou_current",
+      "profile": "test",
+      "scenario_id": 2
+    },
+    {
+      "block": "unseen",
+      "environment_seed": 43001,
+      "family": "ou_current",
+      "profile": "test",
+      "scenario_id": 2
+    },
+    {
+      "block": "unseen",
+      "environment_seed": 43002,
+      "family": "ou_current",
+      "profile": "test",
+      "scenario_id": 2
+    },
+    {
+      "block": "unseen",
+      "environment_seed": 43003,
+      "family": "ou_current",
+      "profile": "test",
+      "scenario_id": 2
+    },
+    {
+      "block": "unseen",
+      "environment_seed": 43004,
+      "family": "ou_current",
+      "profile": "test",
+      "scenario_id": 2
+    },
+    {
+      "block": "unseen",
+      "environment_seed": 43000,
+      "family": "colored_noise",
+      "profile": "test",
+      "scenario_id": 2
+    },
+    {
+      "block": "unseen",
+      "environment_seed": 43001,
+      "family": "colored_noise",
+      "profile": "test",
+      "scenario_id": 2
+    },
+    {
+      "block": "unseen",
+      "environment_seed": 43002,
+      "family": "colored_noise",
+      "profile": "test",
+      "scenario_id": 2
+    },
+    {
+      "block": "unseen",
+      "environment_seed": 43003,
+      "family": "colored_noise",
+      "profile": "test",
+      "scenario_id": 2
+    },
+    {
+      "block": "unseen",
+      "environment_seed": 43004,
+      "family": "colored_noise",
+      "profile": "test",
+      "scenario_id": 2
+    },
+    {
+      "block": "unseen",
+      "environment_seed": 43000,
+      "family": "random_freq_amp",
+      "profile": "test",
+      "scenario_id": 2
+    },
+    {
+      "block": "unseen",
+      "environment_seed": 43001,
+      "family": "random_freq_amp",
+      "profile": "test",
+      "scenario_id": 2
+    },
+    {
+      "block": "unseen",
+      "environment_seed": 43002,
+      "family": "random_freq_amp",
+      "profile": "test",
+      "scenario_id": 2
+    },
+    {
+      "block": "unseen",
+      "environment_seed": 43003,
+      "family": "random_freq_amp",
+      "profile": "test",
+      "scenario_id": 2
+    },
+    {
+      "block": "unseen",
+      "environment_seed": 43004,
+      "family": "random_freq_amp",
+      "profile": "test",
+      "scenario_id": 2
+    },
+    {
+      "block": "unseen",
+      "environment_seed": 43000,
+      "family": "mass_damping_mismatch",
+      "profile": "test",
+      "scenario_id": 2
+    },
+    {
+      "block": "unseen",
+      "environment_seed": 43001,
+      "family": "mass_damping_mismatch",
+      "profile": "test",
+      "scenario_id": 2
+    },
+    {
+      "block": "unseen",
+      "environment_seed": 43002,
+      "family": "mass_damping_mismatch",
+      "profile": "test",
+      "scenario_id": 2
+    },
+    {
+      "block": "unseen",
+      "environment_seed": 43003,
+      "family": "mass_damping_mismatch",
+      "profile": "test",
+      "scenario_id": 2
+    },
+    {
+      "block": "unseen",
+      "environment_seed": 43004,
+      "family": "mass_damping_mismatch",
+      "profile": "test",
+      "scenario_id": 2
+    },
+    {
+      "block": "unseen",
+      "environment_seed": 43000,
+      "family": "actuator_delay_noise",
+      "profile": "test",
+      "scenario_id": 3
+    },
+    {
+      "block": "unseen",
+      "environment_seed": 43001,
+      "family": "actuator_delay_noise",
+      "profile": "test",
+      "scenario_id": 3
+    },
+    {
+      "block": "unseen",
+      "environment_seed": 43002,
+      "family": "actuator_delay_noise",
+      "profile": "test",
+      "scenario_id": 3
+    },
+    {
+      "block": "unseen",
+      "environment_seed": 43003,
+      "family": "actuator_delay_noise",
+      "profile": "test",
+      "scenario_id": 3
+    },
+    {
+      "block": "unseen",
+      "environment_seed": 43004,
+      "family": "actuator_delay_noise",
+      "profile": "test",
+      "scenario_id": 3
+    },
+    {
+      "block": "unseen",
+      "environment_seed": 43000,
+      "family": "estimation_delay",
+      "profile": "test",
+      "scenario_id": 2
+    },
+    {
+      "block": "unseen",
+      "environment_seed": 43001,
+      "family": "estimation_delay",
+      "profile": "test",
+      "scenario_id": 2
+    },
+    {
+      "block": "unseen",
+      "environment_seed": 43002,
+      "family": "estimation_delay",
+      "profile": "test",
+      "scenario_id": 2
+    },
+    {
+      "block": "unseen",
+      "environment_seed": 43003,
+      "family": "estimation_delay",
+      "profile": "test",
+      "scenario_id": 2
+    },
+    {
+      "block": "unseen",
+      "environment_seed": 43004,
+      "family": "estimation_delay",
+      "profile": "test",
+      "scenario_id": 2
+    },
+    {
+      "block": "unseen",
+      "environment_seed": 43000,
+      "family": "fast_ou",
+      "profile": "test",
+      "scenario_id": 2
+    },
+    {
+      "block": "unseen",
+      "environment_seed": 43001,
+      "family": "fast_ou",
+      "profile": "test",
+      "scenario_id": 2
+    },
+    {
+      "block": "unseen",
+      "environment_seed": 43002,
+      "family": "fast_ou",
+      "profile": "test",
+      "scenario_id": 2
+    },
+    {
+      "block": "unseen",
+      "environment_seed": 43003,
+      "family": "fast_ou",
+      "profile": "test",
+      "scenario_id": 2
+    },
+    {
+      "block": "unseen",
+      "environment_seed": 43004,
+      "family": "fast_ou",
+      "profile": "test",
+      "scenario_id": 2
+    }
+  ],
+  "git_commit": "f109d1cf31371d3879b73158563c2eda8aef71c7",
+  "methods": [
+    "smc",
+    "mpc",
+    "constant_alpha",
+    "sspo",
+    "v3_transformer",
+    "v3_transformer",
+    "v3_transformer",
+    "v3_transformer",
+    "v3_transformer",
+    "wm_hybrid",
+    "wm_hybrid",
+    "wm_hybrid",
+    "wm_hybrid",
+    "wm_hybrid",
+    "residual_rl",
+    "residual_rl",
+    "residual_rl",
+    "residual_rl",
+    "residual_rl",
+    "wm_residual_rl",
+    "wm_residual_rl",
+    "wm_residual_rl",
+    "wm_residual_rl",
+    "wm_residual_rl"
+  ],
+  "model_seeds": [
+    31000,
+    31001,
+    31002,
+    31003,
+    31004
+  ],
+  "profile": "formal",
+  "protocol_version": "predictive_authority_v4",
+  "rl_checkpoint_sha256": {
+    "rl/seed_31000": "de08823b83478ee20b6e133594d57f204605dd8ebe9e726aef73c718553a2d67",
+    "rl/seed_31001": "43e0e7f0ec5bc36a5c366010553e54f42cfefaf6e3867033678f23d1b10ae567",
+    "rl/seed_31002": "74805c64f149d52ab92de98485e9b823edef980790bf8e74a7bb629e10dc1898",
+    "rl/seed_31003": "68fe517738dd23c3850fdb9852e9209142c5c1ba70f4ff184586d95330bd1f02",
+    "rl/seed_31004": "b6c55f78517e97b9dc73c860663c4a4e711c22519fab5611c55cfebb5fd8bdbd",
+    "wm_rl/seed_31000": "cb622bd34489ac085bfc1e5c77282edb3662344f4743e8d50943915aed53d038",
+    "wm_rl/seed_31001": "c4f568765e6814e6fd7963e8ee8973576811f93233ea5f5fd14f50b226bae271",
+    "wm_rl/seed_31002": "951b68c8c3d249173547f938b72205e8d556b2c1ec62b009e68699726d21d2c3",
+    "wm_rl/seed_31003": "9f3f6d390d1ae4f97cf64b82e449ff828b3f6fb4492788bf1d129927d1becef2",
+    "wm_rl/seed_31004": "8dcb52cdb0f747ce4ad52dad2eb3daf18a7b812b9ffdf9b137e3873a6df0f58b"
+  },
+  "run_id": "formal-stage2-baseline-r3",
+  "sspo_schedule_path": "runs\\predictive_authority_v4\\sspo-v4\\best_bias_schedule.json",
+  "sspo_schedule_sha256": "8b14a499d99e5e6546a5bcb08e5f776d53ec306c64a00b8ca53228ef447275de",
+  "wm_checkpoint": "runs\\predictive_authority_v4\\wm-formal-v2\\world_model.pt",
+  "wm_checkpoint_sha256": "b98316329021f22d686c88de6fac307ca8b288f78b097f63ff98b46d2cd68466"
+}

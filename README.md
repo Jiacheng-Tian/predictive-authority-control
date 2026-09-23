@@ -90,3 +90,19 @@ headline metrics, and a short end-to-end training and evaluation workflow.
 New experiments are written under the ignored `runs/` directory. The runners
 refuse to use a non-empty output directory, so the archived evidence under
 `results/` is never overwritten by default.
+
+## v4 stage-two evidence (residual RL + formal grid)
+
+Frozen at `results/formal_v4/stage2-residual-rl-2026-09-23`. Constrained
+TD3 residual RL (frozen v3 backbone, bounded delta-alpha, 5 seeds) versus
+the frozen v3 Transformer, WM-hybrid, WM-feature RL, SSPO, fixed
+controllers, and a constant-alpha control over a 120-episode paired
+seen/unseen grid including eval-only fast-current and estimation-delay
+regimes. Headline (model-seed paired, t(4)): residual RL improves unseen
+RMSE over v3 by -0.0445 m [-0.0737, -0.0154] while being +0.0028 m
+[0.0009, 0.0047] worse on seen; WM-hybrid and WM-feature RL are
+statistically indistinguishable from their non-WM counterparts; RL lowers
+control cost and saturation but raises the MPC deadline-miss fraction.
+The pure-learning capacity control (same architecture without the physics
+baseline) degrades one-step RMSE by ~2000x on unseen disturbances,
+isolating the structural contribution of the physics prior.
