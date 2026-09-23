@@ -306,7 +306,7 @@ PREREGISTERED_COMPARISONS = (
 
 def _paired_effects(raw: pd.DataFrame) -> pd.DataFrame:
     """Model-seed level paired effects with t(4) CIs, per block."""
-    key_columns = ["block", "family", "environment_seed"]
+    key_columns = ["block", "family", "scenario_id", "environment_seed"]
     rows: list[dict[str, Any]] = []
     model_seeds = sorted({
         int(seed) for seed in raw["model_seed"].dropna().unique()
@@ -632,6 +632,10 @@ def run_v4_formal(
         temporary = None
     finally:
         if temporary is not None:
+            recovered = output_root / f".recovered-{run_id}.jsonl"
+            partial = temporary / "partial_rows.jsonl"
+            if partial.is_file() and partial.stat().st_size > 0:
+                shutil.copy2(partial, recovered)
             shutil.rmtree(temporary, ignore_errors=True)
     return target
 
