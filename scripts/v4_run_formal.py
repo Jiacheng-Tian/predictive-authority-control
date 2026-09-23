@@ -31,6 +31,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--include-wm-rl", action="store_true")
     parser.add_argument("--wm-rl-dir", default=None)
     parser.add_argument("--jobs", type=int, default=1)
+    parser.add_argument(
+        "--resume-from", default=None,
+        help="partial_rows.jsonl of an interrupted run to resume from",
+    )
     parser.add_argument("--progress-every", type=int, default=10)
     return parser
 
@@ -49,6 +53,7 @@ def main(argv: list[str] | None = None) -> int:
         include_wm_rl=arguments.include_wm_rl,
         wm_rl_dir=arguments.wm_rl_dir,
         jobs=arguments.jobs,
+        resume_from=arguments.resume_from,
         progress_every=arguments.progress_every,
         log=lambda message: print(message, file=sys.stderr, flush=True),
     )

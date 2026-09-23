@@ -421,8 +421,15 @@ def run_v4_formal(
         wm_rl_dir: str | Path | None = None,
         jobs: int = 1,
         progress_every: int = 0,
+        resume_from: str | Path | None = None,
         log: Callable[[str], None] = lambda message: None) -> Path | dict[str, Any]:
-    """Run the paired formal v4 grid; returns the run directory."""
+    """Run the paired formal v4 grid; returns the run directory.
+
+    ``resume_from`` points at a ``partial_rows.jsonl`` saved by an earlier
+    interrupted run (crash, OOM kill, reboot): tasks whose episodes are
+    already complete in that file are skipped and its rows are merged into
+    the final tables.
+    """
     config_path = Path(config_path).resolve()
     config = load_v4_config(config_path)
     dataset_dir = Path(dataset_dir).resolve()
@@ -462,10 +469,40 @@ def run_v4_formal(
     target = output_root / str(run_id)
     if target.exists():
         raise FileExistsError(f"formal v4 run directory already exists: {target}")
+    resumed_rows: list[dict[str, Any]] = []
+    if resume_from is not None:
+        resume_path = Path(resume_from).resolve()
+        with resume_path.open("r", encoding="utf-8") as stream:
+            resumed_rows = [
+                json.loads(line)
+                for line in stream
+                if line.strip()
+            ]
+        counts: dict[str, int] = {}
+        for row in resumed_rows:
+            counts[row["episode_uid"]] = counts.get(row["episode_uid"], 0) + 1
+        combo_count = len(combos)
+        complete_uids = {
+            uid for uid, count in counts.items() if count >= combo_count
+        }
+        before = len(tasks)
+        tasks = [task for task in tasks
+                 if str(build_task_spec(config, task).episode_uid)
+                 not in complete_uids]
+        log(
+            f"[formal-v4] resumed {len(resumed_rows)} rows; skipping "
+            f"{before - len(tasks)} complete tasks, {len(tasks)} remaining"
+        )
+        plan = {
+            **plan,
+            "episodes": len(tasks),
+            "rollouts": len(tasks) * combo_count,
+            "resumed_rows": len(resumed_rows),
+        }
     output_root.mkdir(parents=True, exist_ok=True)
     temporary = Path(tempfile.mkdtemp(prefix=f".{run_id}.tmp-", dir=str(output_root)))
     try:
-        rows: list[dict[str, Any]] = []
+        rows: list[dict[str, Any]] = list(resumed_rows)
         completed = 0
         total = plan["rollouts"]
         if jobs > 1:
@@ -478,6 +515,10 @@ def run_v4_formal(
                 include_wm_rl, wm_sigma,
             )
             partial_rows_path = temporary / "partial_rows.jsonl"
+            if resumed_rows:
+                with partial_rows_path.open("w", encoding="utf-8") as stream:
+                    for row in resumed_rows:
+                        stream.write(json.dumps(row, sort_keys=True) + chr(10))
             with context.Pool(
                     processes=int(jobs),
                     initializer=_worker_initialize,
