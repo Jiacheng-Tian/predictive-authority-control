@@ -78,7 +78,11 @@ class CurrentOnlyModel:
     def predict_delta(self, windows: torch.Tensor):
         with torch.no_grad():
             _delta_state, delta_current = self.wm_model.predict_delta(windows)
-        return torch.zeros_like(delta_current[:, :STATE_DIM]), delta_current
+        zeros = torch.zeros(
+            delta_current.shape[0], STATE_DIM,
+            dtype=delta_current.dtype, device=delta_current.device,
+        )
+        return zeros, delta_current
 
 
 class ConservativeEnsemble:

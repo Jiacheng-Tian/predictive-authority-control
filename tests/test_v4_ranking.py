@@ -237,6 +237,38 @@ class RankingTests(unittest.TestCase):
         self.assertEqual(costs.shape, (11,))
         self.assertTrue(np.isfinite(costs).all())
 
+    def test_current_only_model_returns_full_state_delta(self):
+        # Regression: the zero state delta was once sliced from the
+        # 2-column current delta, yielding an empty (B, 0) tensor that
+        # crashed the rollout evaluator's numpy broadcast.
+        from pac.v4.worldmodel.validate import CurrentOnlyModel
+
+        class TinyModel:
+            def predict_delta(self, batch_windows):
+                batch = batch_windows.shape[0]
+                return (
+                    torch.full((batch, 12), 0.5),
+                    torch.full((batch, 2), 0.25),
+                )
+
+        wrapped = CurrentOnlyModel(TinyModel())
+        delta_state, delta_current = wrapped.predict_delta(torch.zeros(4, 3, 32))
+        self.assertEqual(tuple(delta_state.shape), (4, 12))
+        self.assertTrue(np.allclose(delta_state.numpy(), 0.0))
+        self.assertTrue(np.allclose(delta_current.numpy(), 0.25))
+
+        windows = select_ranking_windows(
+            self.dataset,
+            split="train",
+            windows_per_episode=1,
+            horizon=20,
+            history_len=16,
+        )
+        evaluator = CandidateRolloutEvaluator(self.config, device="cpu")
+        costs = evaluator.single_model_costs(wrapped, windows[0])
+        self.assertEqual(costs.shape, (11,))
+        self.assertTrue(np.isfinite(costs).all())
+
 
 if __name__ == "__main__":
     unittest.main()
