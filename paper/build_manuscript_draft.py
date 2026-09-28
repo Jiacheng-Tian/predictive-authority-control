@@ -32,8 +32,8 @@ bf = pd.read_csv(STAGE2 / "formal" / "block_family_summary.csv")
 METHOD_ORDER = ["smc", "mpc", "constant_alpha", "sspo", "v3_transformer",
                 "residual_rl"]
 METHOD_NAME = {"smc": "SMC", "mpc": "MPC", "constant_alpha": "Fixed \u03b1 = 0.5",
-               "sspo": "SSPO", "v3_transformer": "PAC-S",
-               "residual_rl": "PAC-RL"}
+               "sspo": "SSPO", "v3_transformer": "Supervised PAC",
+               "residual_rl": "Residual PAC"}
 
 FIG_N = {"n": 0}
 TAB_N = {"n": 0}
@@ -238,14 +238,14 @@ def build():
               "control (PAC) does not replace these controllers; a compact "
               "temporal encoder predicts a bounded authority coefficient that "
               "convexly blends their commands, so no thruster command is ever "
-              "produced by the network. We extend the supervised policy (PAC-S) "
-              "with a constrained residual stage (PAC-RL): the supervisor is "
+              "produced by the network. We extend the supervised PAC policy "
+              "with a constrained residual stage: the supervisor is "
               "frozen, and a zero-initialized 2,177-parameter head outputs a "
               "correction bounded by 0.1, so the deployed system is numerically "
               "identical to the baseline at initialization. In a paired, "
               "registered evaluation of 1,680 simulation rollouts over "
               "in-distribution and out-of-distribution disturbance families, "
-              "PAC-RL reduces out-of-distribution tracking RMSE by 28% "
+              "The residual policy reduces out-of-distribution tracking RMSE by 28% "
               "(0.161 m to 0.116 m; 95% CI [\u22120.074, \u22120.015] m), confines the "
               "degradation failure to 0.090 m, and pays a measured price: "
               "in-distribution error +0.4%, heading error +4.3%, and a solver "
@@ -397,18 +397,33 @@ def build():
               "reproduces the deployed baseline numerically at "
               "initialization, enforced by a unit test comparing full-episode "
               "rollouts to tight numerical tolerances. The worst case of the "
-              "learning components is therefore the baseline policy itself.")
+              "learning components is therefore the baseline policy itself. Figure 2 "
+              "details the two networks and the two-phase training procedure: the "
+              "backbone is frozen throughout phase 2, and the residual head is "
+              "zero-initialized, so the composite policy starts exactly at the "
+              "supervised baseline.")
     figure(doc, "fig1_system_architecture",
            "Predictive authority control architecture. (a) Closed loop: the "
            "experts generate commands blended by \u03b1; a frozen temporal encoder "
            "predicts the supervised coefficient and a bounded, zero-initialized "
            "residual head revises it. (b) Layered safety filter in execution order. "
            "(c) Two-phase training.")
+    figure(doc, "fig_network_training",
+           "Network architectures and two-phase training. (a) The frozen "
+           "temporal encoder (14,113 parameters) maps a 16\u00d724 history "
+           "through a 32-dimensional embedding and one Transformer encoder "
+           "layer (four-head attention, 128-unit feed-forward) to the "
+           "supervised authority; the trainable residual head (two linear "
+           "layers, 2,177 parameters, zero-initialized final layer) revises "
+           "it by at most 0.1 per step. (b) Phase 1 trains the backbone by "
+           "imitation of the short-horizon oracle; phase 2 trains only the "
+           "residual head with TD3, behavior regularization, and a "
+           "warm-start replay.")
 
     # ------------------------- 4 learning -------------------------
     heading(doc, 1, "4  Learning the Authority Residual")
     heading(doc, 2, "4.1  Supervised initialization")
-    para(doc, "The supervised policy (PAC-S) is trained by imitation of a "
+    para(doc, "The supervised PAC policy is trained by imitation of a "
               "short-horizon oracle: for each training state, candidate "
               "coefficients from a five-point grid are held for ten steps with "
               "the current frozen, and the label minimizes")
@@ -421,7 +436,7 @@ def build():
               "independently; these frozen policies supervise all later stages "
               "and are never retrained.")
     heading(doc, 2, "4.2  Constrained residual stage")
-    para(doc, "The residual policy (PAC-RL) appends a two-layer head with "
+    para(doc, "The residual policy appends a two-layer head with "
               "2,177 parameters to each frozen supervisor. The applied "
               "coefficient is")
     equation(doc, "\u03b1\u209c = clip[0,1]( \u03b1\u0302\u209c + \u0394\u03b1\u209c ),   \u0394\u03b1\u209c = 0.1\u2009tanh(z\u209c),", 3)
@@ -430,7 +445,7 @@ def build():
               "(twin critics, target smoothing, delayed policy updates) over "
               "closed-loop episodes with environment seeds disjoint from all "
               "evaluation seeds, warm-started with 2\u00d710\u2075 offline transitions "
-              "collected under PAC-S, with a behavior-regularization term "
+              "collected under the supervised policy, with a behavior-regularization term "
               "penalizing deviation from the supervisor. The reward combines "
               "position and heading error, command magnitude and rate, "
               "saturation, deadline flags, and constraint violations; all "
@@ -456,7 +471,8 @@ def build():
     para(doc, "Eight methods are compared: the experts alone (SMC, MPC), a "
               "constant blend (Fixed \u03b1 = 0.5), a non-learning adaptive "
               "baseline searching window-level bias schedules by coordinate "
-              "descent (SSPO), and the two PAC variants (PAC-S, PAC-RL) each "
+              "descent (SSPO, a coordinate-search ablation rather than an external "
+              "baseline), and the two PAC variants (supervised and residual) each "
               "instantiated "
               "with the same five frozen supervised seeds. Fixed methods "
               "contribute one combination each, giving 14 method-seed "
@@ -475,7 +491,7 @@ def build():
     # ------------------------- 6 results -------------------------
     heading(doc, 1, "6  Results")
     heading(doc, 2, "6.1  Closed-loop tracking: how the vehicle actually moves")
-    para(doc, "Figure 2 shows representative paired episodes\u2014an "
+    para(doc, "Figure 3 shows representative paired episodes\u2014an "
               "in-distribution sinusoidal current and the out-of-distribution "
               "actuator-degradation episode\u2014as three-dimensional paths, "
               "horizontal projections, and vertical error. In-distribution, "
@@ -483,8 +499,9 @@ def build():
               "reference closely; SMC lags with a visible offset. Under "
               "actuator degradation the character changes: the MPC expert "
               "alone distorts the horizontal loop and drifts in depth (0.886 "
-              "m episode RMSE), PAC-S inherits part of that failure (0.206 m), "
-              "and PAC-RL stays on the reference (0.088 m), slightly better "
+              "m episode RMSE), the supervised policy inherits part of that "
+              "failure (0.206 m), and the residual policy stays on the "
+              "reference (0.088 m), slightly better "
               "than the never-adapting constant blend (0.124 m).")
     figure(doc, "fig2_closed_loop_trajectories",
            "Representative closed-loop trajectories. Columns: in-distribution "
@@ -495,20 +512,36 @@ def build():
            "Rows: three-dimensional path, horizontal projection, vertical "
            "tracking error (dashed line, zero). The fixed blend is omitted "
            "for legibility; its values appear in Table 1.")
-    para(doc, "Figure 3 resolves the same episodes in time. The position-error "
+    para(doc, "Figure 4 resolves the same episodes in time. The position-error "
               "row shows the MPC divergence under degradation growing through "
               "the episode rather than spiking, consistent with a steadily "
               "wrong internal model rather than a transient. Heading error "
-              "and pitch remain small for PAC-RL in both regimes, while the "
+              "and pitch remain small for residual PAC in both regimes, while the "
               "degraded MPC episode carries visible attitude excursions. "
               "Table 1 aggregates the full grid.")
     figure(doc, "fig3_error_attitude",
            "Time-resolved motion errors for the two episodes of Fig. 2. Rows: "
            "three-dimensional position error, absolute heading error, pitch "
            "angle. The MPC divergence under actuator degradation grows "
-           "through the episode; PAC-RL remains close to the reference in "
+           "through the episode; residual PAC remains close to the reference in "
            "both regimes. Single episodes; block-level aggregates appear in "
-           "Table 1 and Fig. 5.")
+           "Table 1 and Fig. 7.")
+    para(doc, "Residual training is stable across seeds. Figure 5 shows the "
+              "per-seed mean episode reward during phase 2, collected under "
+              "exploration noise on the rotating training-family schedule; "
+              "the trend therefore reflects the changing episode mix rather "
+              "than greedy-policy performance, and no seed diverges. All "
+              "five seeds yield policies with consistent closed-loop "
+              "behavior in the registered evaluation (Fig. 6, Table 1), "
+              "which is the performance measure of record.")
+    figure(doc, "fig_training_curves",
+           "Residual training across the five model seeds. Thin lines: "
+           "per-seed mean episode reward under exploration noise on the "
+           "rotating training-family schedule (the trend reflects the "
+           "changing episode mix, not greedy-policy performance); bold "
+           "line: five-seed mean. No seed diverges; greedy closed-loop "
+           "performance is the registered evaluation of Fig. 6 and "
+           "Table 1.")
     rows = []
     for m in METHOD_ORDER:
         rows.append([
@@ -528,11 +561,11 @@ def build():
           "(means over five model seeds for learned methods; ID, "
           "in-distribution; OOD, out-of-distribution with respect to "
           "disturbance-family sampling). Five-seed dispersion is reported as "
-          "confidence intervals in Fig. 4a.",
+          "confidence intervals in Fig. 6a.",
           [1.35, 0.95, 0.95, 1.0, 0.95, 1.0, 0.85])
     heading(doc, 2, "6.2  Where the residual earns its value")
-    para(doc, "Across the OOD block, PAC-RL reduces tracking RMSE from 0.161 m "
-              "(PAC-S) to 0.116 m. The registered model-seed paired effect is "
+    para(doc, "Across the OOD block, the residual policy reduces tracking RMSE "
+              "from 0.161 m (supervised) to 0.116 m. The registered model-seed paired effect is "
               "\u22120.0445 m with a 95% t(4) interval of [\u22120.0737, \u22120.0154] m "
               "(28% relative reduction); the episode-level bootstrap over the "
               "35 OOD episodes is [\u22120.0759, \u22120.0167] m, consistent with the "
@@ -540,7 +573,8 @@ def build():
               "0.414 m (five-seed means) and OOD heading error improves by "
               "0.73\u00b0.")
     para(doc, "The sharpest reading of Table 1 is unfavorable to us: a "
-              "constant \u03b1 = 0.5 reaches 0.120 m OOD, within 3% of PAC-RL. That "
+              "constant \u03b1 = 0.5 reaches 0.120 m OOD, within 3% of the residual "
+              "policy. That "
               "comparison was not registered and we make no significance "
               "claim; the honest summary is that the residual's overall "
               "advantage over never adapting is small, and its value is "
@@ -549,18 +583,18 @@ def build():
               "The in-distribution effect is +0.0028 m [+0.0009, +0.0047] "
               "(+0.4%) and in-distribution heading error rises by 0.32\u00b0 "
               "[+0.29, +0.35] (+4.3%).")
-    para(doc, "The family decomposition in Fig. 4b locates the gain, and the "
-              "registered paired effects in Fig. 4a quantify it. The SSPO "
-              "versus PAC-RL contrast is not included in the archived "
+    para(doc, "The family decomposition in Fig. 6b locates the gain, and the "
+              "registered paired effects in Fig. 6a quantify it. The SSPO "
+              "versus residual PAC contrast is not included in the archived "
               "paired-effects summary; it is recomputed from raw episode "
               "metrics with the same seed-level procedure: OOD \u22120.0198 m "
-              "[\u22120.0211, \u22120.0185] in favor of PAC-RL, ID +0.0043 m "
+              "[\u22120.0211, \u22120.0185] in favor of the residual policy, ID +0.0043 m "
               "[+0.0033, +0.0053] in favor of SSPO.")
     figure(doc, "fig4_closed_loop_results",
            "Registered paired effects and family decomposition. (a) RMSE "
            "paired effects with model-seed t(4) 95% intervals by block (OOD, "
            "ID); filled markers denote intervals excluding zero; the SSPO "
-           "versus PAC-S contrast is as archived; the SSPO contrast is "
+           "versus supervised contrast is as archived; the SSPO contrast is "
            "recomputed from raw episode metrics. (b) OOD RMSE by "
            "disturbance family and method. Gains concentrate in the "
            "actuator-degradation family; in the mild stochastic and "
@@ -575,13 +609,13 @@ def build():
                         f"{fam_mean(m, 'seen', 'actuator_delay_noise'):.3f}",
                         f"{ood:.3f}", rel])
     table(doc,
-          ["Method", "ID RMSE (m)", "OOD RMSE (m)", "vs PAC-S"],
+          ["Method", "ID RMSE (m)", "OOD RMSE (m)", "vs supervised PAC"],
           ad_rows,
           "Actuator-degradation family (response lag with measurement noise): "
           "paired family means.",
           [1.6, 1.2, 1.2, 1.1])
     heading(doc, 2, "6.3  How does the residual act?")
-    para(doc, "The mechanism is visible in Fig. 5b. Within seconds of "
+    para(doc, "The mechanism is visible in Fig. 7b. Within seconds of "
               "degraded-thruster onset, the supervised policy drives \u03b1 above "
               "0.9 and oscillates there for much of the episode (31.2% of "
               "steps above 0.9; standard deviation 0.331); the residual "
@@ -590,17 +624,42 @@ def build():
               "learned to veto the supervisor's excursions. We read this as "
               "conservatism under distribution shift, a single-family "
               "observation we do not extrapolate.")
+    para(doc, "The stabilization generalizes beyond the single episode: "
+              "across all 35 OOD episodes and five seeds (175 episodes per "
+              "method), the per-episode mean authority is 0.82 \u00b1 0.14 "
+              "for the supervised policy (10th\u201390th percentile 0.62\u20130.93) "
+              "and 0.54 \u00b1 0.03 for the residual policy, with every residual "
+              "episode inside [0.48, 0.62] (Fig. 7c).")
     figure(doc, "fig5_actuator_case",
            "Actuator-degradation episode (held-out seed 43000, fixed before "
            "inspection; family means superposed as text). (a) Position error. "
-           "(b) Authority coefficient. Family-mean coefficients: 0.63 (PAC-S) "
-           "versus 0.50 (PAC-RL).")
-    heading(doc, 2, "6.4  The price of the gain")
+           "(b) Authority coefficient in the representative episode. "
+           "(c) Per-episode mean authority over all 35 OOD episodes and "
+           "five seeds (175 points per method; bars mark means). Family-mean "
+           "coefficients: 0.63 (supervised) versus 0.50 (residual).")
+    heading(doc, 2, "6.4  Control quality: the gain is not purchased with actuator abuse")
+    para(doc, "On the OOD block the residual policy attains the lowest "
+              "saturation-step fraction of all six methods (0.126, versus "
+              "0.134 for the fixed blend and 0.168 for the supervised "
+              "policy), the lowest applied control cost (31.9 versus 33.7), "
+              "and a rate-limit activation of 0.039 below both experts. The "
+              "paired effect on control cost is \u22121.78 [\u22122.31, \u22121.26] OOD "
+              "and \u22120.52 [\u22120.56, \u22120.48] ID: the residual policy is in fact "
+              "cheaper to run than its supervisor while tracking better "
+              "OOD. This substantiates the registered criterion that gains "
+              "must not be purchased with heading, saturation, or "
+              "constraint degradation (Fig. 8).")
+    figure(doc, "fig_control_quality",
+           "Control quality by method and block (bars: five-seed means). "
+           "(a) Applied control cost. (b) Saturation-step fraction. "
+           "(c) Rate-limit activation. The residual policy attains the "
+           "lowest OOD saturation and control cost of all methods.")
+    heading(doc, 2, "6.5  The price of the gain")
     para(doc, "Two costs accompany the OOD gain. In-distribution position and "
               "heading error increase as quantified above. And the solver "
               "deadline-miss fraction\u2014steps on which the harness MPC instance "
               "exceeds the 10 ms period, measured identically for every "
-              "method\u2014rises from a common 0.69 baseline to 0.80 under PAC-RL "
+              "method\u2014rises from a common 0.69 baseline to 0.80 under the residual policy "
               "(+0.107 [+0.094, +0.120] OOD; +0.028 [+0.010, +0.047] ID). "
               "The constant blend leaves the metric unchanged, so the "
               "coefficient value itself is not the cause; a candidate "
@@ -616,6 +675,23 @@ def build():
            "which the shared-harness MPC instance exceeds the 10 ms period, "
            "collected identically for all methods. Shaded band: common "
            "baseline level (0.69; SMC / MPC / Fixed \u03b1 / SSPO).")
+    table(doc,
+          ["Metric", "ID effect [95% CI]", "OOD effect [95% CI]"],
+          [["RMSE (m)", "+0.0028 [+0.0009, +0.0047]",
+            "\u22120.0445 [\u22120.0737, \u22120.0154]"],
+           ["Heading error (deg)", "+0.32 [+0.29, +0.35]",
+            "\u22120.73 [\u22121.41, \u22120.06]"],
+           ["Applied control cost", "\u22120.52 [\u22120.56, \u22120.48]",
+            "\u22121.78 [\u22122.31, \u22121.26]"],
+           ["Deadline-miss fraction", "+0.028 [+0.010, +0.047]",
+            "+0.107 [+0.094, +0.120]"]],
+          "Registered paired effects of the residual policy versus the "
+          "supervised baseline across all reported metrics (model-seed "
+          "t(4) 95% intervals). The SSPO contrast, recomputed from raw "
+          "episode metrics, is RMSE OOD \u22120.0198 [\u22120.0211, \u22120.0185] in "
+          "favor of the residual policy and ID +0.0043 [+0.0033, +0.0053] "
+          "in favor of SSPO.",
+          [2.2, 2.2, 2.2])
     para(doc, "Against the six registered criteria concerning the residual "
               "stage, three pass (gains not purchased with heading, "
               "saturation, or constraint violations; ablation "
@@ -649,17 +725,23 @@ def build():
               "the deadline-miss increase (+0.107) has no established cause. "
               "Sixth, deployment latency of the composite policy is "
               "unmeasured.")
-    para(doc, "These boundaries define the next experiments: a second "
-              "residual round with the final encoder block unfrozen under a "
-              "registered rule targeting the in-distribution effect; "
-              "isolation of the deadline mechanism; "
-              "and the hardware protocol of Section 8.")
+    para(doc, "These boundaries define the registered next experiments. "
+              "First, a direct-RL arm\u2014an end-to-end TD3 policy emitting "
+              "thruster commands on the same grid\u2014completes the comparison "
+              "hierarchy that residual-RL studies expect. Second, a "
+              "constant-authority sweep over \u03b1 \u2208 {0, 0.25, 0.5, 0.75, 1} "
+              "exposes the trust landscape that the policy navigates. Both "
+              "require new registered runs. Third, a second residual round "
+              "with the final encoder block unfrozen targets the "
+              "in-distribution effect. Fourth, isolation of the deadline "
+              "mechanism. Fifth, the hardware protocol of Section 8, whose "
+              "first gate is deployment latency.")
 
     # ------------------------- 8 hardware -------------------------
     heading(doc, 1, "8  Planned Hardware Validation")
     para(doc, "The paper is not submission-ready without physical "
               "experiments. The planned study deploys the same SMC, MPC "
-              "expert, PAC-S, and PAC-RL checkpoints on the 10-kg "
+              "expert, supervised PAC, and residual PAC checkpoints on the 10-kg "
               "six-thruster vehicle. The protocol includes at least ten "
               "independent trials per method and disturbance condition, "
               "randomized controller order, a fixed battery-voltage "
