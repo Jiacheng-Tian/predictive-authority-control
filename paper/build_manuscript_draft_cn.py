@@ -1,0 +1,527 @@
+# -*- coding: utf-8 -*-
+"""Chinese edition (mirrors build_manuscript_draft.py).
+
+One question carried through the paper; motion-performance figures first;
+numbered limitations; planned-hardware section; displayed equations;
+self-limiting captions. Table numbers computed live from the frozen archives.
+"""
+from pathlib import Path
+
+import pandas as pd
+from docx import Document
+from docx.enum.table import WD_TABLE_ALIGNMENT
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
+from docx.shared import Cm, Pt, RGBColor
+
+ROOT = Path(__file__).resolve().parents[1]
+FIG = ROOT / "paper" / "manuscript_figures"
+OUT = ROOT / "paper" / "PAC_manuscript_draft_CN_v2.docx"
+STAGE2 = ROOT / "results" / "formal_v4" / "stage2-residual-rl-2026-09-23"
+
+BLACK = RGBColor(0, 0, 0)
+GREY = RGBColor(0x60, 0x60, 0x60)
+
+ov = pd.read_csv(STAGE2 / "formal" / "overall_summary.csv")
+bf = pd.read_csv(STAGE2 / "formal" / "block_family_summary.csv")
+
+METHOD_ORDER = ["smc", "mpc", "constant_alpha", "sspo", "v3_transformer",
+                "residual_rl"]
+METHOD_NAME = {"smc": "SMC", "mpc": "MPC", "constant_alpha": "固定混合 \u03b1=0.5",
+               "sspo": "SSPO", "v3_transformer": "PAC-S",
+               "residual_rl": "PAC-RL"}
+
+FIG_N = {"n": 0}
+TAB_N = {"n": 0}
+
+
+def block_mean(method, block, col):
+    return ov[(ov["method"] == method) & (ov["block"] == block)][col].mean()
+
+
+def fam_mean(method, block, family, col="rmse_3d"):
+    return bf[(bf["method"] == method) & (bf["block"] == block)
+              & (bf["family"] == family)][col].mean()
+
+
+def style_run(run, size=10.5, bold=False, italic=False, color=BLACK,
+              cn="宋体", en="Times New Roman"):
+    run.font.name = en
+    run.font.size = Pt(size)
+    run.font.bold = bold
+    run.font.italic = italic
+    run.font.color.rgb = color
+    rpr = run._element.get_or_add_rPr()
+    rf = rpr.find(qn("w:rFonts"))
+    if rf is None:
+        rf = OxmlElement("w:rFonts")
+        rpr.append(rf)
+    rf.set(qn("w:eastAsia"), cn)
+
+
+def para(doc, text="", size=10.5, bold=False, italic=False, cn="宋体",
+         align=WD_ALIGN_PARAGRAPH.JUSTIFY, after=6, color=BLACK, indent=True):
+    p = doc.add_paragraph()
+    p.alignment = align
+    pf = p.paragraph_format
+    pf.line_spacing = 1.3
+    pf.space_after = Pt(after)
+    if indent:
+        pf.first_line_indent = Pt(size * 2)
+    if text:
+        run = p.add_run(text)
+        style_run(run, size=size, bold=bold, italic=italic, color=color, cn=cn)
+    return p
+
+
+def rich(doc, segments, size=10.5, after=6):
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    pf = p.paragraph_format
+    pf.line_spacing = 1.3
+    pf.space_after = Pt(after)
+    pf.first_line_indent = Pt(size * 2)
+    for text, kw in segments:
+        run = p.add_run(text)
+        style_run(run, size=size, **kw)
+    return p
+
+
+def equation(doc, body, number):
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    pf = p.paragraph_format
+    pf.line_spacing = 1.3
+    pf.space_before = Pt(4)
+    pf.space_after = Pt(6)
+    run = p.add_run(body + "\u2003\u2003\u2003(" + str(number) + ")")
+    style_run(run, size=10.5, italic=True, cn="楷体")
+    return p
+
+
+def heading(doc, level, text):
+    p = doc.add_paragraph()
+    pf = p.paragraph_format
+    pf.line_spacing = 1.3
+    run = p.add_run(text)
+    if level == 1:
+        pf.space_before = Pt(14)
+        pf.space_after = Pt(6)
+        style_run(run, size=13, bold=True, cn="黑体")
+    else:
+        pf.space_before = Pt(10)
+        pf.space_after = Pt(4)
+        style_run(run, size=11.5, bold=True, cn="黑体")
+    return p
+
+
+def figure(doc, stem, caption, width_in=6.3):
+    FIG_N["n"] += 1
+    n = FIG_N["n"]
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p.paragraph_format.keep_with_next = True
+    p.paragraph_format.space_before = Pt(8)
+    run = p.add_run()
+    run.add_picture(str(FIG / f"{stem}.png"), width=Cm(width_in * 2.54))
+    cap = doc.add_paragraph()
+    cap.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    cap.paragraph_format.space_after = Pt(10)
+    c1 = cap.add_run(f"图 {n}  ")
+    style_run(c1, size=9, bold=True)
+    c2 = cap.add_run(caption)
+    style_run(c2, size=9)
+    return n
+
+
+def _shade(cell, fill):
+    tcpr = cell._tc.get_or_add_tcPr()
+    shd = OxmlElement("w:shd")
+    shd.set(qn("w:val"), "clear")
+    shd.set(qn("w:fill"), fill)
+    tcpr.append(shd)
+
+
+def table(doc, header, rows, caption, widths_in):
+    TAB_N["n"] += 1
+    n = TAB_N["n"]
+    cap = doc.add_paragraph()
+    cap.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    cap.paragraph_format.keep_with_next = True
+    cap.paragraph_format.space_before = Pt(8)
+    c1 = cap.add_run(f"表 {n}  ")
+    style_run(c1, size=9, bold=True)
+    c2 = cap.add_run(caption)
+    style_run(c2, size=9, bold=True)
+    t = doc.add_table(rows=1 + len(rows), cols=len(header))
+    t.style = "Table Grid"
+    t.alignment = WD_TABLE_ALIGNMENT.CENTER
+    t.autofit = False
+    for j, h in enumerate(header):
+        cell = t.rows[0].cells[j]
+        cell.width = Cm(widths_in[j] * 2.54)
+        _shade(cell, "F2F2F2")
+        p = cell.paragraphs[0]
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        p.paragraph_format.line_spacing = 1.15
+        run = p.add_run(h)
+        style_run(run, size=8.5, bold=True)
+    t.rows[0]._tr.get_or_add_trPr().append(OxmlElement("w:tblHeader"))
+    for i, row in enumerate(rows):
+        for j, val in enumerate(row):
+            cell = t.rows[i + 1].cells[j]
+            cell.width = Cm(widths_in[j] * 2.54)
+            p = cell.paragraphs[0]
+            p.alignment = WD_ALIGN_PARAGRAPH.LEFT if j == 0 else WD_ALIGN_PARAGRAPH.CENTER
+            p.paragraph_format.line_spacing = 1.15
+            run = p.add_run(str(val))
+            style_run(run, size=8.5)
+    doc.add_paragraph().paragraph_format.space_after = Pt(2)
+    return n
+
+
+def build():
+    doc = Document()
+    st = doc.styles["Normal"]
+    st.font.name = "Times New Roman"
+    st.font.size = Pt(10.5)
+    st._element.rPr.rFonts.set(qn("w:eastAsia"), "宋体")
+    for s in doc.sections:
+        s.top_margin = s.bottom_margin = Cm(2.54)
+        s.left_margin = s.right_margin = Cm(2.54)
+    sec = doc.sections[0]
+    sec.header.is_linked_to_previous = False
+    hp = sec.header.paragraphs[0]
+    hp.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    style_run(hp.add_run("预测权限控制用于自主水下航行器"), size=9, color=GREY)
+    sec.footer.is_linked_to_previous = False
+    fp = sec.footer.paragraphs[0]
+    fp.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    fld = OxmlElement("w:fldSimple")
+    fld.set(qn("w:instr"), "PAGE \\* arabic \\* MERGEFORMAT")
+    r = OxmlElement("w:r")
+    rpr = OxmlElement("w:rPr")
+    sz = OxmlElement("w:sz")
+    sz.set(qn("w:val"), "18")
+    col = OxmlElement("w:color")
+    col.set(qn("w:val"), "808080")
+    rpr.append(sz)
+    rpr.append(col)
+    r.append(rpr)
+    t_el = OxmlElement("w:t")
+    t_el.text = "1"
+    r.append(t_el)
+    fld.append(r)
+    fp._p.append(fld)
+
+    # ---------------- 标题区 ----------------
+    para(doc, "预测权限控制：学习对各控制器的信任程度，并在分布偏移下修复这种信任*",
+         size=15, bold=True, cn="黑体", align=WD_ALIGN_PARAGRAPH.CENTER,
+         indent=False, after=10)
+    para(doc, "[作者姓名]", size=11, italic=True, cn="楷体",
+         align=WD_ALIGN_PARAGRAPH.CENTER, indent=False, after=2)
+    para(doc, "[作者单位]", size=10, italic=True, cn="楷体",
+         align=WD_ALIGN_PARAGRAPH.CENTER, indent=False, after=2)
+    para(doc, "* 缩写 PAC 与机器学习中的 probably approximately correct（概率近似正确）学习无关。",
+         size=9, italic=True, color=GREY, cn="楷体",
+         align=WD_ALIGN_PARAGRAPH.CENTER, indent=False, after=12)
+
+    heading(doc, 1, "摘　要")
+    para(doc, "经典水下控制器以互补的方式失效：滑模控制（SMC）鲁棒但粗糙；受约束模型预测控制"
+              "（MPC）精准，却在执行器退化下崩溃——我们的仿真中其跟踪误差达 0.822 m，"
+              "约为正常水平的九倍。预测权限控制（PAC）不替代这些控制器：一个紧凑的时序编码器"
+              "预测有界的权限系数，对两个专家指令做凸混合，推进器指令从不由网络产生。"
+              "本文在监督策略（PAC-S）之上引入受约束残差阶段（PAC-RL）：监督器冻结，"
+              "新增零初始化的 2,177 参数头输出不超过 0.1 的修正量，系统在部署起点与基线数值一致。"
+              "在 1,680 次配对、预注册的仿真滚动评估中（覆盖分布内与分布外扰动族），"
+              "PAC-RL 将分布外（相对扰动族采样）跟踪均方根误差降低 28%"
+              "（0.161 m 至 0.116 m；95% 置信区间 [−0.074, −0.015] m），"
+              "将退化失效约束至 0.090 m，并付出可测量的代价："
+              "分布内误差 +0.4%、艏向误差 +4.3%、求解器超时率上升。固定混合 α=0.5 总体上"
+              "与之相差不足 3%，因此残差的价值集中在最需要自适应处，而非平均值。"
+              "预注册判定中与残差阶段相关的六项准则：三项通过、两项未通过、一项未评估，"
+              "全部如实报告。")
+    rich(doc, [("全部证据为仿真级别；第 8 节的硬件验证协议尚待执行。", {"bold": True})], after=12)
+
+    heading(doc, 1, "1  引言")
+    para(doc, "精确轨迹跟踪是自主水下航行器（AUV）巡检、作业与取样的核心。该任务至今困难："
+              "水动力系数不确定、海流随海域变化、推进器随老化出现响应延迟与噪声[1,2]。"
+              "SMC 以透明的反馈结构抑制有界扰动，但代价是保守增益与抖振；MPC 引入预测与约束[3]，"
+              "其性能却依赖模型保真度——执行器退化后内部模型不再代表真实对象，"
+              "优化器在错误前提上自信地给出失效指令。")
+    para(doc, "本文只回答一个问题：面对两个完整且互补的控制器，航行器每一时刻应当各信任多少？"
+              "答案随扰动状态连续变化，无法由人工设计的切换规则解决[16]。")
+    para(doc, "我们以权限分配研究该问题。PAC 策略不学习六维推进器指令，而是预测标量 "
+              "α\u209c ∈ [0,1] 并施加")
+    equation(doc, "u\u209c = (1 − α\u209c) u\u209c\u1d34\u1d39\u1d9c + α\u209c u\u209c\u1d39\u1d33\u1d9c ,   α\u209c ∈ [0, 1],", 1)
+    para(doc, "其中 u\u1d34\u1d39\u1d9c 与 u\u1d39\u1d33\u1d9c 分别为 SMC 与 MPC 指令。两个控制器保持显式，"
+              "学习输出有界且可解释，变化率限制阻止权限的突变转移。采用 Transformer 编码"
+              "短历史，是因为控制器偏好不仅取决于瞬时误差，还取决于误差正在增大、正在恢复，"
+              "还是与执行器饱和同时发生。")
+    para(doc, "我们的初步实验建立了该思想的监督形态，也暴露了其缺陷：在训练从未出现的扰动族下，"
+              "学习到的系数劣于不自适应的常数混合，且在全值域内振荡。本文以受约束残差回应该缺陷，"
+              "做出三项贡献，各自回应上述问题：")
+    rich(doc, [("冻结监督器之上的有界残差学习。", {"bold": True}),
+               ("强化学习头对监督式信任答案的每步修正不超过 0.1，且零初始化——组合策略在训练前"
+                "与已部署基线数值一致，此后只能在有界包络内修正信任。", {})])
+    rich(doc, [("分布偏移下的运动层证据。", {"bold": True}),
+               ("轨迹、姿态与误差时序——而非仅聚合指标——展示残差价值所在：监督策略把信任交给"
+                "正在失效的优化器，残差学会了否决这种转移。", {})])
+    rich(doc, [("报告自身失败的预注册评估。", {"bold": True}),
+               ("多种方法在每方法-种子组合 120 个配对回合上比较，采用模型种子置信区间且不做事后"
+                "挑选；两项未通过与一项未评估的判定与通过项一并报告。", {})])
+    para(doc, "本文其余部分安排：第 3 节框架，第 4 节学习阶段，第 5 节实验协议，"
+              "第 6 节运动层与机制层结果，第 7 节局限，第 8 节计划中的硬件验证。")
+
+    heading(doc, 1, "2  相关工作")
+    heading(doc, 2, "2.1  水下航行器控制")
+    para(doc, "海洋航行器控制建立在带附加质量、阻尼与恢复力的刚体动力学之上[1,2]。"
+              "混合方案在阈值切换下将非线性 MPC 与滑模项结合，使各专家停留于有利工况[17]；"
+              "这类切换面在设计时固定，而 PAC 在线、连续地回答信任问题。基于学习的水下控制"
+              "发展迅速：改进 TD3 路径跟踪[10]、并行仿真器中训练六自由度控制并零样本迁移[8]"
+              "均直接学习指令。PAC 则学习关于完整结构化控制器的一维仲裁变量。")
+    heading(doc, 2, "2.2  与结构化控制器结合的学习")
+    para(doc, "残差强化学习在手工设计的基策略上叠加学习修正[5]；actor-critic MPC 将可微优化器"
+              "嵌入策略[6]；学习型 MPC 综述讨论数据驱动修正与安全[4]。PAC 的差异在接口："
+              "残差作用于有界标量权限而非执行器指令；监督器冻结而非联合训练；零初始化给出与"
+              "已部署系统的精确初始等价。学习型安全滤波训练类屏障修正[11]，而 PAC 的安全滤波"
+              "由固定界与结构化回退构成，安全路径中不含学习组件。嵌入式求解器如 TinyMPC[7] "
+              "约束了机载仲裁层可假设的算力。")
+    heading(doc, 2, "2.3  面向序贯决策的时序编码器")
+    para(doc, "自注意力[12]与控制的序列建模表述[13,14]随数据与宽度扩展。PAC 编码器刻意处于相反"
+              "规模：单编码层、16 步历史、输出单系数——对仲裁接口已足够，并使边缘部署成为可能。"
+              "扩散策略[15]与模仿学习导航[9]处理不同输出空间，属互补工作。")
+
+    heading(doc, 1, "3  预测权限控制")
+    heading(doc, 2, "3.1  航行器模型与跟踪目标")
+    para(doc, "位姿与体坐标速度记为 η=[x, y, z, φ, θ, ψ]ᵀ、ν=[u, v, w, p, q, r]ᵀ。仿真器以 "
+              "100 Hz 四阶龙格–库塔积分对角化六自由度模型（附加质量、线性与二次阻尼、恢复刚度），"
+              "每回合 2,100 步（21 s）。六台推进器呈 X 布置、单机限 35 N，受幅值与转速变化率约束。"
+              "参考为三维利萨如曲线，期望艏向对齐水平切向；初始位姿与速度分别以 0.03 m、"
+              "0.01 m/s 标准差扰动。")
+    heading(doc, 2, "3.2  结构化专家控制器")
+    para(doc, "主专家为等价控制滑模控制器：平移滑模面组合速度误差与位姿误差，指令力矩含前馈"
+              "加速度、阻尼补偿与有界趋近项。第二专家为滚动时域线性时变受约束 MPC：视界 20 步"
+              "（0.2 s）、推进器归一化约束、暖启动平滑、在线求解时限 7.5 ms 且超时回退上一拍。"
+              "该专家取代本框架早期实现中的一步二次跟踪律；本文全部结果使用该受约束 MPC。")
+    heading(doc, 2, "3.3  历史特征与时序编码器")
+    para(doc, "每步 24 维特征向量概括位姿误差、体速度、各控制器指令统计与分歧、近饱和比例、"
+              "水平海流分量与轨迹相位；最近 16 个向量构成编码器输入。单层 Transformer 编码器"
+              "（四头注意力、128 维前馈、14,113 可训练参数）经 Sigmoid 头输出 α̂\u209c。"
+              "推理时预测放大 1.2 倍、截断、以系数 0.5 指数平滑、每步变化限制 0.0125。")
+    heading(doc, 2, "3.4  分层安全滤波")
+    para(doc, "学习分量的全部贡献按执行顺序通过固定滤波栈：(i) 残差有界；(ii) 混合系数经截断、"
+              "平滑与变化率限制；(iii) 专家失效强制切回主控；(iv) 非数值回退冻结监督预测。"
+              "残差头零初始化，组合策略在部署起点与已部署基线数值一致——该等价由比较全回合滚动的"
+              "单元测试在紧数值容差下保证。学习组件的最坏情形因此即基线策略本身。")
+    figure(doc, "fig1_system_architecture",
+           "预测权限控制架构。(a) 闭环：专家产生指令并由 α 混合；冻结时序编码器预测监督系数，"
+           "有界、零初始化残差头对其修正。(b) 分层安全滤波（按执行顺序）。(c) 两阶段训练。")
+
+    heading(doc, 1, "4  权限残差的学习")
+    heading(doc, 2, "4.1  监督初始化")
+    para(doc, "监督策略（PAC-S）通过模仿短视界寻优器（oracle）训练：对每个训练状态，"
+              "五点网格候选系数保持十步并冻结海流，标签最小化")
+    equation(doc, "J(α) = ‖e\u2093\u1d67‖² + 0.7 e\u1d63² + 0.08 e\u03c8² + 0.02 mean([|u| − 0.92]₊²) "
+              "+ 0.01 mean((u − u\u209c\u208b\u2081)²),", 2)
+    para(doc, "即水平与垂向位置误差、艏向误差、近饱和幅值与指令变化的组合代价。训练使用 "
+              "18,900 个带标样本、AdamW 180 轮、加权平方损失。五个模型种子独立训练；"
+              "这些冻结策略监督后续全部阶段且从不重训。")
+    heading(doc, 2, "4.2  受约束残差阶段")
+    para(doc, "残差策略（PAC-RL）在每条冻结监督策略上附加 2,177 参数的两层头，施加的系数为")
+    equation(doc, "α\u209c = clip[0,1]( α̂\u209c + Δα\u209c ),   Δα\u209c = 0.1 tanh(z\u209c),", 3)
+    para(doc, "其中 z\u209c 为头输出，末层零初始化，故训练前 Δα ≡ 0。训练采用 TD3（双评论家、目标平滑、"
+              "延迟策略更新），闭环回合的环境种子与全部评估种子不相交，以 PAC-S 下采集的 "
+              "2×10⁵ 条离线过渡热启动，并以行为正则惩罚偏离监督器。奖励综合位置与艏向误差、"
+              "指令幅值与变化率、饱和、超时标志与约束违反；全部权重训练前冻结于清单。"
+              "学习器仅输出 Δα：不能指令推进器，也不能更改 MPC 调度或求解预算。")
+
+    heading(doc, 1, "5  实验设计")
+    heading(doc, 2, "5.1  预注册协议")
+    para(doc, "全部比较、种子划分与验收准则在残差训练开始前冻结并归档。评估网格含 120 个配对"
+              "回合：85 个分布内（20 个保留环境种子下的 60 个结构化海流回合，加五个训练范围"
+              "扰动族的 25 个回合）与 35 个分布外（相对扰动族采样；五个测试范围族，加快时间"
+              "尺度海流族与带传感滞后和噪声的估计延迟族）。每个回合在全部方法与种子间共享："
+              "相同的航行器、海流与参考实现。")
+    heading(doc, 2, "5.2  方法与统计")
+    para(doc, "比较六种方法：单独专家（SMC、MPC）、常数混合（固定 α=0.5）、以坐标下降搜索窗口"
+              "偏置日程的非学习基线（SSPO），以及共用同一组五个冻结监督种子的两种 PAC 变体"
+              "（PAC-S、PAC-RL）。固定方法各贡献一个组合，共 14 个方法-种子组合、1,680 次滚动"
+              "（约 353 万控制步）。")
+    para(doc, "主推断在模型种子级：逐种子配对效应以自由度 4 的 t 分布区间概括。补充的回合级"
+              "自助法区间（对配对回合有放回重采样、10,000 次重采样、随机数种子 0）用于头条对比。"
+              "超出预注册集合的比较不做显著性主张，也不做多重比较校正：注册集合被完整报告而非"
+              "事后挑选。")
+
+    heading(doc, 1, "6  结果")
+    heading(doc, 2, "6.1  闭环跟踪：航行器实际如何运动")
+    para(doc, "图 2 以三维路径、水平投影与垂向误差展示两个代表性配对回合——分布内正弦海流与"
+              "分布外执行器退化回合。分布内，全部学习与混合方法紧贴利萨如参考，SMC 带可见"
+              "偏移地滞后。执行器退化下性质改变：MPC 专家单独工作时水平环线畸变、深度漂移"
+              "（回合 RMSE 0.886 m），PAC-S 继承了部分失效（0.206 m），PAC-RL 保持在参考上"
+              "（0.088 m），略优于从不自适应的固定混合（0.124 m）。")
+    figure(doc, "fig2_closed_loop_trajectories",
+           "代表性闭环轨迹。列：分布内正弦海流与分布外执行器退化（各块编号最小的保留种子，"
+           "检查前固定）；两个回合在方法间共享，并由冻结检查点确定性重放生成。"
+           "行：三维路径、水平投影、垂向误差（虚线为零参考）。固定混合为清晰起见未画出，"
+           "其数值见表 1。")
+    para(doc, "图 3 在时间轴上解析同样两个回合。位置误差行显示退化下的 MPC 发散随回合增长"
+              "而非尖峰出现——与持续错误的内部模型一致，而非瞬态。两个工况下 PAC-RL 的艏向"
+              "误差与俯仰角都保持小值，而退化的 MPC 回合携带可见的姿态偏移。表 1 聚合全网格。")
+    figure(doc, "fig3_error_attitude",
+           "图 2 两个回合的时间解析运动误差。行：三维位置误差、艏向误差绝对值、俯仰角。"
+           "执行器退化下 MPC 的发散随回合增长；PAC-RL 在两个工况下都贴近参考。单回合展示；"
+           "块级聚合见表 1 与图 5。")
+    rows = []
+    for m in METHOD_ORDER:
+        rows.append([
+            METHOD_NAME[m],
+            f"{block_mean(m, 'seen', 'rmse_3d'):.3f}",
+            f"{block_mean(m, 'unseen', 'rmse_3d'):.3f}",
+            f"{block_mean(m, 'unseen', 'max_error'):.3f}",
+            f"{block_mean(m, 'unseen', 'heading_rmse_deg'):.2f}",
+            f"{block_mean(m, 'unseen', 'solver_deadline_miss_step_fraction'):.2f}",
+            f"{block_mean(m, 'unseen', 'authority_alpha_mean'):.2f}",
+        ])
+    table(doc,
+          ["方法", "ID RMSE (m)", "OOD RMSE (m)", "OOD 最大误差 (m)",
+           "OOD 艏向 (°)", "OOD 超时率", "OOD α 均值"],
+          rows,
+          "每方法-种子组合 120 配对回合的评估结果（学习方法为五个模型种子均值；ID 分布内；"
+          "OOD 相对扰动族采样的分布外）。五种子的离散度以置信区间形式报告于图 4a。",
+          [1.5, 0.95, 0.95, 1.1, 0.95, 0.9, 0.85])
+    heading(doc, 2, "6.2  残差的价值在哪里")
+    para(doc, "在 OOD 块上，PAC-RL 将跟踪 RMSE 由 0.161 m（PAC-S）降至 0.116 m。预注册的"
+              "模型种子级配对效应为 −0.0445 m，自由度 4 的 95% t 区间 [−0.0737, −0.0154] m"
+              "（相对降低 28%）；35 个 OOD 回合的回合级自助法区间为 [−0.0759, −0.0167] m，"
+              "与种子级分析一致。最大误差由 0.495 m 降至 0.414 m（五种子均值），"
+              "OOD 艏向误差改善 0.73°。")
+    para(doc, "表 1 最尖锐的读法对我们不利：固定 α=0.5 的 OOD 误差 0.120 m，与 PAC-RL 相差"
+              "不足 3%。该比较未经预注册，本文不做显著性主张；诚实的概括是——残差方法相对"
+              "“从不自适应”的总体优势很小，其价值集中在最需要自适应处（执行器退化族较固定混合"
+              "再降 28%，见表 2）。分布内效应为 +0.0028 m [+0.0009, +0.0047]（+0.4%），"
+              "分布内艏向误差上升 0.32° [+0.29, +0.35]（+4.3%）。")
+    para(doc, "图 4b 的族分解定位增益，图 4a 的预注册配对效应量化增益。SSPO 对 PAC-RL 的比较"
+              "不在归档的配对效应汇总中，以同一种子级程序由原始回合指标补算："
+              "OOD −0.0198 m [−0.0211, −0.0185] 利好 PAC-RL，ID +0.0043 m "
+              "[+0.0033, +0.0053] 利好 SSPO。")
+    figure(doc, "fig4_closed_loop_results",
+           "预注册配对效应与族分解。(a) RMSE 配对效应与模型种子 t(4) 95% 区间，按块（OOD、ID）"
+           "分组；PAC-RL 对 PAC-S 为归档值，SSPO 对比由原始回合指标补算；实心标记为区间不含零。"
+           "(b) 各扰动族×方法的 OOD RMSE。增益集中于执行器退化族；温和随机与估计延迟族上"
+           "监督策略与 SSPO 略优。本面板不支持“全面占优”的解读。")
+    ad_rows = []
+    base = fam_mean("v3_transformer", "unseen", "actuator_delay_noise")
+    for m in METHOD_ORDER:
+        ood = fam_mean(m, "unseen", "actuator_delay_noise")
+        rel = "—" if m == "v3_transformer" else f"{(ood / base - 1) * 100:+.0f}%"
+        ad_rows.append([METHOD_NAME[m],
+                        f"{fam_mean(m, 'seen', 'actuator_delay_noise'):.3f}",
+                        f"{ood:.3f}", rel])
+    table(doc,
+          ["方法", "ID RMSE (m)", "OOD RMSE (m)", "相对 PAC-S"],
+          ad_rows,
+          "执行器退化族（响应延迟叠加测量噪声）：配对族均值。",
+          [1.7, 1.25, 1.25, 1.1])
+    heading(doc, 2, "6.3  残差如何起作用？")
+    para(doc, "机制在图 5b 中可见。推进器退化发生后数秒内，监督策略将 α 推过 0.9 并在回合"
+              "大部分时间里于该处振荡（31.2% 的步数高于 0.9；标准差 0.331）；残差策略从未"
+              "超过 0.69，且在 97.0% 的步数内保持于 [0.4, 0.6]。残差学到的不是一套新的调度"
+              "——它学到的是否决监督策略的越界。我们将其解读为分布偏移下的保守化，"
+              "这是单一家族的观察，我们不外推。")
+    figure(doc, "fig5_actuator_case",
+           "执行器退化回合（保留种子 43000，检查前固定；族均值以文字并置）。"
+           "(a) 位置误差。(b) 权限系数。族均值系数：PAC-S 0.63，PAC-RL 0.50。")
+    heading(doc, 2, "6.4  增益的代价")
+    para(doc, "两项代价伴随 OOD 增益。分布内位置与艏向误差如上量化地增加。求解器超时率——"
+              "评估框架中 MPC 实例墙钟超过 10 ms 控制周期的步数占比，对所有方法同口径测量——"
+              "在 PAC-RL 下由共同的 0.69 基线升至 0.80（OOD +0.107 [+0.094, +0.120]；"
+              "ID +0.028 [+0.010, +0.047]）。固定混合使该指标不变，故系数取值本身并非原因；"
+              "候选解释是依赖轨迹的求解器条件数，作为假设而非结论标注。"
+              "部署侧保障不受影响：回退上一拍指令的触发率全方法为 0.3–0.5%，"
+              "一米阈值任务成功率不变（ID 0.988 / OOD 0.943），OOD 最大误差反而改善。")
+    figure(doc, "fig6_cost_tradeoff",
+           "代价核算。各方法-种子组合的 OOD RMSE 对求解器超时率散点；该指标统计共享评估框架中 "
+           "MPC 实例超过 10 ms 控制周期的步数，对所有方法同口径采集。阴影带：共同基线水平"
+           "（0.69：SMC / MPC / 固定 α / SSPO）。")
+    para(doc, "对照与残差阶段相关的六项预注册验收准则：三项通过（增益未以艏向、饱和"
+              "或约束违反换取；消融可分离；五种子方向稳定）；两项未通过（整体非劣性——经由分布内 "
+              "+0.4% 效应；超时率不恶化）；一项——部署推理时间满足控制周期——未评估，"
+              "且为硬件阶段的第一道门槛。")
+
+    heading(doc, 1, "7  局限与讨论")
+    para(doc, "核心结果是：两千参数量级的残差，仅作用于有界权限系数，将在分布偏移下失效的监督"
+              "仲裁策略，改造为总体上匹配强常数混合、并在最需要自适应处显著占优的策略。安全论证"
+              "是架构性的：零初始化保证部署起点与已部署基线数值一致，有界输出限制此后每次扰动，"
+              "固定回退将最坏情形界定为基线本身。这界定了本文相对残差强化学习[5]（扰动执行器"
+              "指令）与学习型安全滤波[11]（在学习路径中放置学习组件）的位置。")
+    para(doc, "六条边界限定本文主张。第一，全部证据为仿真级别。第二，特征集接收精确海流信息，"
+              "硬件上必须估计。第三，分布外指相对扰动族采样，不指任意现场条件。第四，分布内"
+              "非劣性未通过（位置 +0.4%、艏向 +4.3%）。第五，超时率上升（+0.107）原因未确立。"
+              "第六，组合策略的部署延迟未测量。")
+    para(doc, "这些边界定义了下一步实验：在预注册规则下解冻最后一个编码器块、针对分布内效应的"
+              "残差第二轮训练；隔离超时机制；以及第 8 节的硬件协议。")
+
+    heading(doc, 1, "8  计划中的硬件验证")
+    para(doc, "没有物理实验，本文不具备投稿条件。计划在同一台 10 kg 六推进器航行器上部署相同的 "
+              "SMC、MPC 专家、PAC-S 与 PAC-RL 检查点。协议包括每方法每扰动条件至少十次独立"
+              "试验、控制器次序随机化、固定的电池电压接受窗、相同的轨迹与执行器限制。扰动从"
+              "静水逐步推进到稳态横流、由系留牵引或标定流源产生的可复现阶跃式扰动，以及——"
+              "针对本文主张——注入的执行器退化条件：在部分推进器上施加经标定的一阶指令滞后"
+              "加噪声。")
+    para(doc, "机载估计器须由 IMU、深度、DVL 与定位信息提供位姿、体速度与因果海流估计；"
+              "不得暴露仿真器的精确海流。除位置与姿态 RMSE 外，硬件部分报告最大误差、成功率、"
+              "实测电能耗、逐步推理时延、端到端控制回路时延（即未评估的那项准则）、饱和时长与"
+              "紧急干预。占位项（平台尺寸、传感器套件、试验点标定、试验数）只能以实测值填充，"
+              "不得以仿真或预期数据顶替。")
+
+    heading(doc, 1, "9  结论")
+    para(doc, "PAC 将学习型水下控制重构为结构化控制器之间的信任问题，残差阶段在分布偏移下修复"
+              "这种信任：OOD 跟踪误差降低 28%，种子级与回合级的置信区间均不含零；优化器的退化"
+              "失效被约束至 0.090 m；每一项代价都与训练前固定的准则对照测量。学习组件保持有界、"
+              "可作为单条系数轨迹审计、最坏情形等价于已部署基线。硬件验证、因果海流估计、时延"
+              "测量与时变混合的稳定性分析，是任何面向真实环境的鲁棒性主张之前提。")
+
+    heading(doc, 1, "数据可用性")
+    para(doc, "本文全部数值来自哈希冻结的归档（配置、数据集与检查点摘要及逐文件校验和），"
+              "覆盖监督与残差两个训练阶段与配对评估。每幅图与每张表的源数据均可由代码库构建脚本"
+              "从这些归档重新生成；轨迹图由冻结检查点对归档回合做确定性重放。")
+
+    heading(doc, 1, "参考文献")
+    refs = [
+        "T. I. Fossen. Handbook of Marine Craft Hydrodynamics and Motion Control[M]. 2nd ed. Wiley, 2021.",
+        "G. Antonelli. Underwater Robots: Motion and Force Control of Vehicle-Manipulator Systems[M]. 3rd ed. Springer, 2014.",
+        "E. F. Camacho, C. Bordons Alba. Model Predictive Control[M]. 2nd ed. Springer, 2013.",
+        "L. Hewing, K. P. Wabersich, M. Menner, M. N. Zeilinger. Learning-based model predictive control: Toward safe learning in control[J]. Annual Review of Control, Robotics, and Autonomous Systems, 2020, 3: 269–296.",
+        "T. Johannink, et al. Residual reinforcement learning for robot control[C]//Proc. IEEE ICRA, 2019: 6023–6029.",
+        "A. Romero, Y. Song, D. Scaramuzza. Actor-critic model predictive control[C]//Proc. IEEE ICRA, 2024: 14777–14784.",
+        "K. Nguyen, S. Schoedel, A. Alavilli, B. Plancher, Z. Manchester. TinyMPC: Model-predictive control on resource-constrained microcontrollers[C]//Proc. IEEE ICRA, 2024.",
+        "L. Cai, K. Chang, Y. Girdhar. Learning to swim: Reinforcement learning for 6-DOF control of thruster-driven autonomous underwater vehicles[C]//Proc. IEEE ICRA, 2025: 11286–11293.",
+        "X. Lin, et al. UIVNAV: Underwater information-driven vision-based navigation via imitation learning[C]//Proc. IEEE ICRA, 2024: 5250–5256.",
+        "Y. Fan, H. Dong, X. Zhao, P. Denissenko. Path-following control of unmanned underwater vehicle based on an improved TD3 deep reinforcement learning[J]. IEEE Transactions on Control Systems Technology, 2024, 32(5): 1904–1919.",
+        "O. So, et al. How to train your neural control barrier function: Learning safety filters for complex input-constrained systems[C]//Proc. IEEE ICRA, 2024: 11532–11539.",
+        "A. Vaswani, et al. Attention is all you need[C]//Advances in Neural Information Processing Systems, 2017, 30: 5998–6008.",
+        "L. Chen, et al. Decision Transformer: Reinforcement learning via sequence modeling[C]//Advances in Neural Information Processing Systems, 2021, 34: 15084–15097.",
+        "M. Janner, Q. Li, S. Levine. Offline reinforcement learning as one big sequence modeling problem[C]//Advances in Neural Information Processing Systems, 2021, 34: 1273–1286.",
+        "C. Chi, et al. Diffusion policy: Visuomotor policy learning via action diffusion[C]//Robotics: Science and Systems, 2023.",
+        "D. Liberzon. Switching in Systems and Control[M]. Birkhäuser, 2003.",
+        "Z. Zhao, X. Liu, T. Wang, Z. Zhou, M. Zhang. Hybrid control scheme of nonlinear model prediction and adaptive terminal sliding mode for underwater vehicles based on threshold switching[J]. ISA Transactions, 2026, 176: 580–590.",
+    ]
+    for i, ref in enumerate(refs, 1):
+        p = doc.add_paragraph()
+        pf = p.paragraph_format
+        pf.line_spacing = 1.3
+        pf.space_after = Pt(3)
+        pf.left_indent = Cm(0.75)
+        pf.first_line_indent = Cm(-0.75)
+        run = p.add_run(f"[{i}]  {ref}")
+        style_run(run, size=9.5)
+
+    doc.save(OUT)
+    print(f"saved: {OUT}")
+    print(f"figures: {FIG_N['n']}, tables: {TAB_N['n']}")
+
+
+if __name__ == "__main__":
+    build()
