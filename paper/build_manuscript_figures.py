@@ -4,7 +4,7 @@
 Inherits the v2 manuscript figure conventions (Arial, 7.2 in double column,
 bold panel letters, SMC/MPC/PAC base palette) and adds the v4 evidence set.
 Method naming carries no internal codenames:
-  SMC / MPC / Fixed alpha / SSPO / PAC-S / PAC-RL
+  SMC / MPC / Fixed alpha / SSPO / Supervised PAC / Residual PAC
 """
 from pathlib import Path
 
@@ -25,8 +25,8 @@ STAGE2 = ROOT / "results" / "formal_v4" / "stage2-residual-rl-2026-09-23" / "for
 METHODS = ["smc", "mpc", "constant_alpha", "sspo", "v3_transformer",
            "residual_rl"]
 LABEL = {"smc": "SMC", "mpc": "MPC", "constant_alpha": "Fixed $\\alpha$=0.5",
-         "sspo": "SSPO", "v3_transformer": "PAC-S",
-         "residual_rl": "PAC-RL"}
+         "sspo": "SSPO", "v3_transformer": "Supervised PAC",
+         "residual_rl": "Residual PAC"}
 COLOR = {"smc": "#514D83", "mpc": "#CC9429", "constant_alpha": "#8C9196",
          "sspo": "#3F7E72", "v3_transformer": "#B6242E",
          "residual_rl": "#6E141C"}
@@ -315,12 +315,17 @@ def fig4_results():
 def fig5_actuator_case():
     case = pd.read_csv(ROOT / "paper" / "data" / "case_actuator_delay.csv")
     case = case[case["environment_seed"] == 43000]
-    show = {"mpc": "MPC", "v3_transformer": "PAC-S", "residual_rl": "PAC-RL"}
+    show = {"mpc": "MPC", "v3_transformer": "Supervised PAC",
+            "residual_rl": "Residual PAC"}
 
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(7.2, 3.6), sharex=True,
-                                   gridspec_kw={"hspace": 0.12})
+    fig = plt.figure(figsize=(7.2, 5.0))
+    gs = fig.add_gridspec(3, 1, height_ratios=[1.05, 1.0, 0.75], hspace=0.42)
+    ax1 = fig.add_subplot(gs[0])
+    ax2 = fig.add_subplot(gs[1], sharex=ax1)
+    ax3 = fig.add_subplot(gs[2])
     panel_letter(ax1, "a")
     panel_letter(ax2, "b")
+    panel_letter(ax3, "c")
     for m, lab in show.items():
         d = case[case["method"] == m].sort_values("time")
         rmse = d["episode_rmse"].iloc[0]
@@ -334,7 +339,7 @@ def fig5_actuator_case():
     ax1.grid(True, color="#E3E6EA", linewidth=0.55)
     ax1.spines[["top", "right"]].set_visible(False)
     ax2.axhspan(0.4, 0.6, color="#EFEDF5", zorder=0)
-    ax2.set_ylabel(r"authority $\alpha$")
+    ax2.set_ylabel("authority $\\alpha$")
     ax2.set_xlabel("time (s)")
     ax2.set_ylim(-0.03, 1.05)
     ax2.legend(loc="upper left", fontsize=7)
@@ -345,17 +350,15 @@ def fig5_actuator_case():
     hi_pct = (v3a > 0.9).mean() * 100
     band_pct = ((rla >= 0.4) & (rla <= 0.6)).mean() * 100
     ax2.text(0.99, 0.05,
-             f"PAC-S: {hi_pct:.1f}% of steps $\\alpha>0.9$;  "
-             f"PAC-RL: {band_pct:.1f}% of steps $\\alpha\\in[0.4,0.6]$\n"
-             "family-mean $\\alpha$ over the OOD actuator family: "
-             "PAC-S 0.63, PAC-RL 0.50",
-             transform=ax2.transAxes, fontsize=6.4, color="#555555", ha="right",
-             va="bottom", linespacing=1.35)
+             f"Supervised: {hi_pct:.1f}% of steps $\\alpha>0.9$;  "
+             f"Residual: {band_pct:.1f}% of steps $\\alpha\\in[0.4,0.6]$",
+             transform=ax2.transAxes, fontsize=6.4, color="#555555",
+             ha="right", va="bottom")
+    alpha_distribution_axis(ax3)
     fig.tight_layout()
     save(fig, "fig5_actuator_case")
 
 
-# ================================================================ Figure 6
 def fig6_cost():
     ov = pd.read_csv(STAGE2 / "overall_summary.csv")
     ood = ov[ov["block"] == "unseen"]
@@ -455,11 +458,215 @@ def fig3_error_attitude():
     save(fig, "fig3_error_attitude")
 
 
+# ================================================================ Figure 2
+def fig_network_training():
+    """Network architecture (backbone + residual head) and two-phase training."""
+    fig = plt.figure(figsize=(7.2, 3.4))
+    gs = fig.add_gridspec(1, 2, width_ratios=[2.5, 1.0], wspace=0.18)
+
+    # ---------------- panel a: network architecture ----------------
+    ax = fig.add_subplot(gs[0, 0])
+    ax.set_xlim(0, 12)
+    ax.set_ylim(0, 6)
+    ax.axis("off")
+    panel_letter(ax, "a")
+
+    def box(x, y, w, h, text, face, edge="#333333", size=6.8, lw=0.9, ls="-"):
+        patch = FancyBboxPatch((x, y), w, h,
+                               boxstyle="round,pad=0.05,rounding_size=0.1",
+                               facecolor=face, edgecolor=edge, linewidth=lw,
+                               linestyle=ls, zorder=2)
+        ax.add_patch(patch)
+        ax.text(x + w / 2, y + h / 2, text, ha="center", va="center",
+                fontsize=size, zorder=3, linespacing=1.2)
+
+    def arrow(x1, y1, x2, y2, color="#333333", lw=0.9):
+        ax.add_patch(FancyArrowPatch((x1, y1), (x2, y2), arrowstyle="-|>",
+                                     mutation_scale=8, color=color,
+                                     linewidth=lw, zorder=1))
+
+    # frozen backbone pipeline (upper)
+    box(0.15, 4.15, 1.5, 1.15,
+        "history $\\mathbf{X}_t$\n$16\\times24$", "#FFFFFF", edge="#333333", lw=1.0)
+    box(2.0, 4.15, 1.7, 1.15,
+        "linear embed 32\n+ positional", TINT, edge="#514D83")
+    box(4.0, 3.95, 2.5, 1.55,
+        "Transformer encoder layer\n4-head MHA $\\to$ FFN 128 (GELU)\nLayerNorm",
+        TINT, edge="#514D83")
+    box(6.9, 4.15, 1.6, 1.15, "sigmoid head\n$\\hat{\\alpha}\\in[0,1]$", TINT,
+        edge="#514D83")
+    arrow(1.65, 4.72, 2.0, 4.72)
+    arrow(3.7, 4.72, 4.0, 4.72)
+    arrow(6.5, 4.72, 6.9, 4.72)
+    ax.text(5.25, 3.72, "frozen, 14,113 params", fontsize=6.2, ha="center",
+            color="#514D83")
+    ax.text(0.15, 5.55, "\u2744", fontsize=9, color="#514D83")
+
+    # trainable residual head (lower)
+    box(4.0, 1.55, 2.5, 1.15,
+        "encoder token features (32-d)", "#FFFFFF", edge="#333333", lw=0.8,
+        ls="--")
+    ax.add_patch(FancyArrowPatch((5.25, 3.9), (5.25, 2.75), arrowstyle="-|>",
+                                 mutation_scale=8, color="#8C9196",
+                                 linewidth=0.9, linestyle="--"))
+    box(6.9, 1.45, 2.6, 1.35,
+        "residual head: Linear 32$\\to$64\n(GELU) $\\to$ Linear 64$\\to$1\n"
+        "zero-init final layer", TINT_R, edge="#B6242E", lw=1.0)
+    arrow(6.5, 2.1, 6.9, 2.1)
+    box(9.9, 1.45, 2.0, 1.35,
+        "$\\Delta\\alpha=0.1\\,$tanh$(\\cdot)$\n$|\\Delta\\alpha|\\leq0.1$",
+        TINT_R, edge="#B6242E")
+    arrow(9.5, 2.1, 9.9, 2.1)
+    ax.text(8.2, 1.05, "trainable, 2,177 params", fontsize=6.2, ha="center",
+            color="#B6242E")
+    ax.text(6.9, 2.95, "\u2744  frozen token path", fontsize=6.0,
+            color="#8C9196")
+
+    # composition
+    ax.add_patch(FancyArrowPatch((8.5, 4.15), (10.6, 3.5), arrowstyle="-|>",
+                                 mutation_scale=8, color="#514D83",
+                                 linewidth=0.9, connectionstyle="arc3,rad=0.2"))
+    ax.add_patch(FancyArrowPatch((11.9, 2.8), (11.4, 3.5), arrowstyle="-|>",
+                                 mutation_scale=8, color="#B6242E",
+                                 linewidth=0.9))
+    box(9.9, 3.55, 2.0, 1.0,
+        "$\\alpha_t=\\mathrm{clip}_{[0,1]}(\\hat{\\alpha}+\\Delta\\alpha)$",
+        "#FFFFFF", edge="#333333", lw=1.1, size=6.6)
+    ax.text(10.9, 3.25, "safety filter", fontsize=6.2, ha="center",
+            color="#555555")
+    ax.text(0.15, 0.55, "zero initialization: $\\Delta\\alpha\\equiv0$ before "
+            "training, so the composite policy equals the supervised baseline",
+            fontsize=6.2, color="#555555")
+
+    # ---------------- panel b: two-phase training ----------------
+    axb = fig.add_subplot(gs[0, 1])
+    axb.set_xlim(0, 10)
+    axb.set_ylim(0, 10)
+    axb.axis("off")
+    panel_letter(axb, "b")
+    axb.text(5, 9.6, "two-phase training", fontsize=8.5, fontweight="bold",
+             ha="center")
+    boxb = FancyBboxPatch((0.6, 5.4), 8.8, 3.0,
+                          boxstyle="round,pad=0.06,rounding_size=0.1",
+                          facecolor=TINT, edgecolor="#514D83", linewidth=0.9)
+    axb.add_patch(boxb)
+    axb.text(5.0, 7.7, "phase 1  supervised", fontsize=7.5, fontweight="bold",
+             ha="center", color="#514D83")
+    axb.text(5.0, 6.3, "imitation of short-horizon\noracle over 5-point "
+             "$\\alpha$ grid\n(18,900 labels)", fontsize=6.8, ha="center",
+             va="center", linespacing=1.3)
+    axb.add_patch(FancyArrowPatch((5.0, 5.3), (5.0, 4.7), arrowstyle="-|>",
+                                  mutation_scale=8, color="#333333",
+                                  linewidth=0.9))
+    boxb2 = FancyBboxPatch((0.6, 1.2), 8.8, 3.4,
+                           boxstyle="round,pad=0.06,rounding_size=0.1",
+                           facecolor=TINT_R, edgecolor="#B6242E",
+                           linewidth=0.9)
+    axb.add_patch(boxb2)
+    axb.text(5.0, 3.9, "phase 2  residual TD3", fontsize=7.5,
+             fontweight="bold", ha="center", color="#B6242E")
+    axb.text(5.0, 2.3, "frozen backbone, twin critics,\nbehavior regularization, "
+             "$2\\times10^{5}$ warm-start\ntransitions, 5 model seeds",
+             fontsize=6.8, ha="center", va="center", linespacing=1.3)
+
+    fig.tight_layout()
+    save(fig, "fig_network_training")
+
+
+# ================================================================ training curves
+def fig_training_curves():
+    hist_dir = ROOT / "runs" / "predictive_authority_v4" / "rl-round1"
+    fig, ax = plt.subplots(figsize=(7.2, 2.6))
+    panel_letter(ax, "a")
+    seeds = (31000, 31001, 31002, 31003, 31004)
+    frames = []
+    for seed in seeds:
+        h = pd.read_csv(hist_dir / f"training_history_seed_{seed}.csv")
+        frames.append(h)
+        ax.plot(h["env_steps"] / 1e5, h["mean_episode_reward"], lw=0.7,
+                color="#8C9196", alpha=0.65, zorder=2)
+    steps = frames[0]["env_steps"] / 1e5
+    mean = np.mean([f["mean_episode_reward"].to_numpy() for f in frames], axis=0)
+    ax.plot(steps, mean, lw=1.8, color="#B6242E", zorder=3,
+            label="5-seed mean")
+    ax.set_xlabel("environment steps ($10^5$)")
+    ax.set_ylabel("mean episode reward")
+    ax.legend(loc="lower right", fontsize=7.5)
+    ax.grid(True, color="#E3E6EA", linewidth=0.55)
+    ax.spines[["top", "right"]].set_visible(False)
+    fig.tight_layout()
+    save(fig, "fig_training_curves")
+
+
+# ================================================================ alpha distribution panel
+def alpha_distribution_axis(ax):
+    raw = pd.read_csv(STAGE2 / "raw_metrics.csv")
+    ood = raw[raw["block"] == "unseen"]
+    groups = [("v3_transformer", "Supervised PAC", COLOR["v3_transformer"]),
+              ("residual_rl", "Residual PAC", COLOR["residual_rl"])]
+    rng = np.random.default_rng(0)
+    for i, (m, lab, col) in enumerate(groups):
+        vals = ood[ood["method"] == m]["authority_alpha_mean"].to_numpy()
+        x = rng.normal(i, 0.055, size=len(vals))
+        ax.scatter(x, vals, s=7, color=col, alpha=0.55, linewidths=0,
+                   zorder=3, label=lab)
+        ax.hlines(np.mean(vals), i - 0.22, i + 0.22, color=col, lw=1.6,
+                  zorder=4)
+    ax.axhline(0.5, color="#777777", lw=0.8, ls="--", alpha=0.8)
+    ax.text(1.42, 0.505, "fixed blend 0.5", fontsize=6.4, color="#555555",
+            ha="right")
+    ax.set_xticks([0, 1], ["Supervised PAC", "Residual PAC"], fontsize=7.5)
+    ax.set_ylabel("per-episode mean $\\alpha$")
+    ax.set_ylim(0.2, 1.02)
+    ax.grid(True, axis="y", color="#E3E6EA", linewidth=0.55)
+    ax.spines[["top", "right"]].set_visible(False)
+
+
+# ================================================================ control quality
+def fig_control_quality():
+    ovd = pd.read_csv(STAGE2 / "overall_summary.csv")
+    fig, axes = plt.subplots(1, 3, figsize=(7.2, 2.7), sharey=False)
+    panel_letter(axes[0], "a")
+    metrics = [
+        ("applied_control_cost", "control cost", False),
+        ("action_saturation_step_fraction", "saturation step fraction", True),
+        ("actuator_rate_limit_episode_mean", "rate-limit activation", True),
+    ]
+    x = np.arange(len(METHODS))
+    w = 0.38
+    for ax, (col, label, small) in zip(axes, metrics):
+        for k, block in enumerate(("seen", "unseen")):
+            means, sds = [], []
+            for m in METHODS:
+                d = ovd[(ovd["method"] == m) & (ovd["block"] == block)][col]
+                means.append(d.mean())
+                sds.append(d.std(ddof=1) if len(d) > 1 else 0.0)
+            ax.bar(x + (k - 0.5) * w, means, w,
+                   color=["#8B87C8", "#B6242E"][k],
+                   label=("ID" if k == 0 else "OOD"),
+                   yerr=np.array(sds) * (0.0 if small else 1.0),
+                   error_kw=dict(lw=0.7, capsize=1.5), zorder=3)
+        ax.set_xticks(x, [LABEL[m].replace("Supervised PAC", "Sup. PAC")
+                          .replace("Residual PAC", "Res. PAC")
+                          .replace("Fixed $\\alpha$=0.5", "Fixed $\\alpha$")
+                          for m in METHODS], rotation=45, ha="right",
+                      fontsize=6.2)
+        ax.set_title(label, fontsize=8)
+        ax.grid(True, axis="y", color="#E3E6EA", linewidth=0.55)
+        ax.spines[["top", "right"]].set_visible(False)
+    axes[0].legend(fontsize=7, loc="upper left")
+    fig.tight_layout()
+    save(fig, "fig_control_quality")
+
+
 if __name__ == "__main__":
     fig1_architecture()
+    fig_network_training()
     fig2_trajectories()
     fig3_error_attitude()
     fig4_results()
     fig5_actuator_case()
     fig6_cost()
+    fig_training_curves()
+    fig_control_quality()
     print(f"all figures -> {OUT}")
