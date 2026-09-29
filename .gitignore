@@ -14,6 +14,7 @@ paper/*
 !paper/build_manuscript_figures.py
 !paper/build_hero_figures.py
 !paper/build_template_deck.py
+!paper/build_full_deck.py
 !paper/latex_math.py
 !paper/collect_case_study.py
 !paper/collect_trajectory_case.py
@@ -26,6 +27,7 @@ paper/data/*
 !paper/PAC_manuscript_draft_v2.docx
 !paper/PAC_manuscript_draft_CN_latest.docx
 !paper/PAC_组会答辩_20260929.pptx
+!paper/PAC_组会答辩_完整版.pptx
 !paper/PAC_manuscript_draft_CN_v2.docx
 runs/
 build/
