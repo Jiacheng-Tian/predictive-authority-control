@@ -18,6 +18,8 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Cm, Pt, RGBColor
 
+from latex_math import add_math_run, math_paragraph
+
 ROOT = Path(__file__).resolve().parents[1]
 FIG = ROOT / "paper" / "manuscript_figures"
 OUT = ROOT / "paper" / "PAC_manuscript_draft_v2.docx"
@@ -89,15 +91,8 @@ def rich(doc, segments, size=11, align=WD_ALIGN_PARAGRAPH.JUSTIFY, after=6):
 
 
 def equation(doc, body, number):
-    p = doc.add_paragraph()
-    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    pf = p.paragraph_format
-    pf.line_spacing = 1.3
-    pf.space_before = Pt(4)
-    pf.space_after = Pt(6)
-    run = p.add_run(body + "   (" + str(number) + ")")
-    style_run(run, size=11, italic=True, font="Cambria Math")
-    return p
+    """body is a LaTeX string; rendered as native Word equation."""
+    return math_paragraph(doc, body, number)
 
 
 def heading(doc, level, text):
@@ -296,8 +291,9 @@ def build():
               "Rather than learning a six-dimensional thruster command, "
               "PAC predicts one scalar $\\alpha_t\\in[0,1]$ and applies")
     equation(doc,
-             "\\vect{u}_t=(1-\\alpha_t)\\vect{u}^{\\mathrm{SMC}}_t"
-             "+\\alpha_t\\vect{u}^{\\mathrm{MPC}}_t", 1)
+             r"\boldsymbol{u}_t=(1-\alpha_t)\boldsymbol{u}^{\mathrm{SMC}}_t"
+             r"+\alpha_t\boldsymbol{u}^{\mathrm{MPC}}_t", 1)
+
     para(doc, "where $\\vect{u}^{\\mathrm{MPC}}_t$ is the "
               "predictive-controller command. The two controllers remain "
               "explicit, the learned output is bounded and interpretable, "
@@ -444,8 +440,10 @@ def build():
               "short-horizon oracle: for each training state, candidate "
               "coefficients from a five-point grid are held for ten steps with "
               "the current frozen, and the label minimizes")
-    equation(doc, "J(\u03b1) = \u2016e\u2093\u1d67\u2016\u00b2 + 0.7 e\u1d63\u00b2 + 0.08 e\u03c8\u00b2 + 0.02 mean([|u| \u2212 0.92]\u208a\u00b2) "
-              "+ 0.01 mean((u \u2212 u\u209c\u208b\u2081)\u00b2),", 2)
+    equation(doc,
+             r"J(\alpha) = \|\boldsymbol{e}_{xy}\|^2 + 0.7\,e_z^2 + 0.08\,e_\psi^2"
+             r"\, + 0.02\,\mathrm{mean}([\,|\boldsymbol{u}|-0.92\,]_+^2)"
+             r"\, + 0.01\,\mathrm{mean}((\boldsymbol{u}-\boldsymbol{u}_{t-1})^2)", 2)
     para(doc, "a cost combining horizontal and vertical position error, heading "
               "error, near-saturation magnitude, and command change. Training "
               "uses 18,900 labeled samples, AdamW for 180 epochs, and a "
@@ -456,7 +454,8 @@ def build():
     para(doc, "The residual policy appends a two-layer head with "
               "2,177 parameters to each frozen supervisor. The applied "
               "coefficient is")
-    equation(doc, "\u03b1\u209c = clip[0,1]( \u03b1\u0302\u209c + \u0394\u03b1\u209c ),   \u0394\u03b1\u209c = 0.1\u2009tanh(z\u209c),", 3)
+    equation(doc,
+             r"\alpha_t = \mathrm{clip}_{[0,1]}(\hat{\alpha}_t+\Delta\alpha_t),\quad\Delta\alpha_t = 0.1\,\tanh(z_t)", 3)
     para(doc, "where z\u209c is the head output and the final layer is "
               "zero-initialized, so \u0394\u03b1 \u2261 0 before training. Training uses TD3 "
               "(twin critics, target smoothing, delayed policy updates) over "
@@ -839,9 +838,40 @@ def build():
         run = p.add_run(f"[{i}]  {ref}")
         style_run(run, size=9.5)
 
+    postprocess_inline_math(doc)
     doc.save(OUT)
     print(f"saved: {OUT}")
     print(f"figures: {FIG_N['n']}, tables: {TAB_N['n']}")
+
+
+
+
+def postprocess_inline_math(doc):
+    """Scan all paragraphs; convert $...$ LaTeX to native math runs."""
+    from docx.oxml.ns import qn
+    import re as _re
+    for p in doc.paragraphs:
+        full = p.text
+        if '$' not in full:
+            continue
+        parts = _re.split(r'(\$[^$]+\$)', full)
+        if len(parts) <= 1:
+            continue
+        # clear existing runs
+        for r in list(p.runs):
+            r._r.getparent().remove(r._r)
+        for part in parts:
+            if part.startswith('$') and part.endswith('$') and len(part) > 2:
+                latex = part[1:-1]
+                try:
+                    add_math_run(p, latex, display=False)
+                except Exception:
+                    run = p.add_run(part)
+                    style_run(run)
+            else:
+                if part:
+                    run = p.add_run(part)
+                    style_run(run)
 
 
 if __name__ == "__main__":

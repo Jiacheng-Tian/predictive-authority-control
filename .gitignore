@@ -14,6 +14,7 @@ paper/*
 !paper/build_manuscript_figures.py
 !paper/build_hero_figures.py
 !paper/build_template_deck.py
+!paper/latex_math.py
 !paper/collect_case_study.py
 !paper/collect_trajectory_case.py
 !paper/manuscript_figures

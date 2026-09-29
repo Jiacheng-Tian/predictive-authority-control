@@ -15,6 +15,8 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Cm, Pt, RGBColor
 
+from latex_math import add_math_run, math_paragraph
+
 ROOT = Path(__file__).resolve().parents[1]
 FIG = ROOT / "paper" / "manuscript_figures"
 OUT = ROOT / "paper" / "PAC_manuscript_draft_CN_v2.docx"
@@ -89,15 +91,8 @@ def rich(doc, segments, size=10.5, after=6):
 
 
 def equation(doc, body, number):
-    p = doc.add_paragraph()
-    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    pf = p.paragraph_format
-    pf.line_spacing = 1.3
-    pf.space_before = Pt(4)
-    pf.space_after = Pt(6)
-    run = p.add_run(body + "\u2003\u2003\u2003(" + str(number) + ")")
-    style_run(run, size=10.5, italic=True, cn="楷体")
-    return p
+    """body is a LaTeX string; rendered as native Word equation."""
+    return math_paragraph(doc, body, number)
 
 
 def heading(doc, level, text):
@@ -262,8 +257,9 @@ def build():
     para(doc, "我们通过权限分配研究这一问题。PAC 不学习六维推进器指令，而是预测"
               "标量 $\\alpha_t\\in[0,1]$ 并施加")
     equation(doc,
-             "\\vect{u}_t=(1-\\alpha_t)\\vect{u}^{\\mathrm{SMC}}_t"
-             "+\\alpha_t\\vect{u}^{\\mathrm{MPC}}_t", 1)
+             r"\boldsymbol{u}_t=(1-\alpha_t)\boldsymbol{u}^{\mathrm{SMC}}_t"
+             r"+\alpha_t\boldsymbol{u}^{\mathrm{MPC}}_t", 1)
+
     para(doc, "其中 $\\vect{u}^{\\mathrm{MPC}}_t$ 为预测控制器指令。两个"
               "控制器保持显式，学习输出有界且可解释，变化率限制器阻止权限的"
               "突变转移。Transformer 编码短历史，因为控制器偏好不仅取决于瞬时"
@@ -343,15 +339,16 @@ def build():
     heading(doc, 2, "4.1  监督初始化")
     para(doc, "监督 PAC 策略通过模仿短视界寻优器（oracle）训练：对每个训练状态，"
               "五点网格候选系数保持十步并冻结海流，标签最小化")
-    equation(doc, "J(α) = ‖e\u2093\u1d67‖² + 0.7 e\u1d63² + 0.08 e\u03c8² + 0.02 mean([|u| − 0.92]₊²) "
-              "+ 0.01 mean((u − u\u209c\u208b\u2081)²),", 2)
+    equation(doc,
+             r"J(\alpha) = \|\boldsymbol{e}_{xy}\|^2 + 0.7\,e_z^2 + 0.08\,e_\psi^2\, + 0.02\,mathrm{mean}([\,|\boldsymbol{u}|-0.92\,]_+^2)\, + 0.01\,mathrm{mean}((\boldsymbol{u}-\boldsymbol{u}_{t-1})^2)", 2)
     para(doc, "即水平与垂向位置误差、艏向误差、近饱和幅值与指令变化的组合代价。训练使用 "
               "18,900 个带标样本、AdamW 180 轮、加权平方损失。五个模型种子独立训练；"
               "这些冻结策略监督后续全部阶段且从不重训。")
     heading(doc, 2, "4.2  受约束残差阶段")
     para(doc, "残差策略在每条冻结监督策略上附加 2,177 参数的两层头，施加的系数为")
-    equation(doc, "α\u209c = clip[0,1]( α̂\u209c + Δα\u209c ),   Δα\u209c = 0.1 tanh(z\u209c),", 3)
-    para(doc, "其中 z\u209c 为头输出，末层零初始化，故训练前 Δα ≡ 0。训练采用 TD3（双评论家、目标平滑、"
+    equation(doc,
+             r"\alpha_t = \mathrm{clip}_{[0,1]}(\hat{\alpha}_t+\Delta\alpha_t),\quad\Delta\alpha_t = 0.1\,\tanh(z_t)", 3)
+    para(doc, "其中 z_t 为头输出，末层零初始化，故训练前 Δα ≡ 0。训练采用 TD3（双评论家、目标平滑、"
               "延迟策略更新），闭环回合的环境种子与全部评估种子不相交，以监督策略下采集的 "
               "2×10⁵ 条离线过渡热启动，并以行为正则惩罚偏离监督器。奖励综合位置与艏向误差、"
               "指令幅值与变化率、饱和、超时标志与约束违反；全部权重训练前冻结于清单。"
@@ -581,9 +578,40 @@ def build():
         run = p.add_run(f"[{i}]  {ref}")
         style_run(run, size=9.5)
 
+    postprocess_inline_math(doc)
     doc.save(OUT)
     print(f"saved: {OUT}")
     print(f"figures: {FIG_N['n']}, tables: {TAB_N['n']}")
+
+
+
+
+def postprocess_inline_math(doc):
+    """Scan all paragraphs; convert $...$ LaTeX to native math runs."""
+    from docx.oxml.ns import qn
+    import re as _re
+    for p in doc.paragraphs:
+        full = p.text
+        if '$' not in full:
+            continue
+        parts = _re.split(r'(\$[^$]+\$)', full)
+        if len(parts) <= 1:
+            continue
+        # clear existing runs
+        for r in list(p.runs):
+            r._r.getparent().remove(r._r)
+        for part in parts:
+            if part.startswith('$') and part.endswith('$') and len(part) > 2:
+                latex = part[1:-1]
+                try:
+                    add_math_run(p, latex, display=False)
+                except Exception:
+                    run = p.add_run(part)
+                    style_run(run)
+            else:
+                if part:
+                    run = p.add_run(part)
+                    style_run(run)
 
 
 if __name__ == "__main__":
