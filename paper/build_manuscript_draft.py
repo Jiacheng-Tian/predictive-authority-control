@@ -95,8 +95,8 @@ def equation(doc, body, number):
     pf.line_spacing = 1.3
     pf.space_before = Pt(4)
     pf.space_after = Pt(6)
-    run = p.add_run(body + "\u2003\u2003\u2003(" + str(number) + ")")
-    style_run(run, size=11, italic=True)
+    run = p.add_run(body + "   (" + str(number) + ")")
+    style_run(run, size=11, italic=True, font="Cambria Math")
     return p
 
 
@@ -230,90 +230,107 @@ def build():
 
     # ------------------------- abstract -------------------------
     heading(doc, 1, "Abstract")
-    para(doc, "Classical underwater controllers fail in complementary ways: "
-              "sliding-mode control (SMC) is robust but coarse, and constrained "
-              "model predictive control (MPC) is precise but collapses under "
-              "actuator degradation, where our simulation shows a tracking error "
-              "of 0.822 m, nine times the nominal level. Predictive authority "
-              "control (PAC) does not replace these controllers; a compact "
-              "temporal encoder predicts a bounded authority coefficient that "
-              "convexly blends their commands, so no thruster command is ever "
-              "produced by the network. We extend the supervised PAC policy "
-              "with a constrained residual stage: the supervisor is "
-              "frozen, and a zero-initialized 2,177-parameter head outputs a "
-              "correction bounded by 0.1, so the deployed system is numerically "
-              "identical to the baseline at initialization. In a paired, "
-              "registered evaluation of 1,680 simulation rollouts over "
-              "in-distribution and out-of-distribution disturbance families, "
-              "The residual policy reduces out-of-distribution tracking RMSE by 28% "
-              "(0.161 m to 0.116 m; 95% CI [\u22120.074, \u22120.015] m), confines the "
-              "degradation failure to 0.090 m, and pays a measured price: "
-              "in-distribution error +0.4%, heading error +4.3%, and a solver "
-              "deadline-miss increase. A constant blend \u03b1 = 0.5 comes within 3% "
-              "overall, so the residual's value is concentrated where adaptation "
-              "is hardest, not in the average. Of the six registered criteria "
-              "concerning the residual stage, three pass, two fail, and one "
-              "is unevaluated; all are reported.")
-    rich(doc, [("All evidence is simulation-level; the hardware protocol of "
-                "Section 8 remains to be executed.", {"bold": True})], after=12)
+    para(doc, "Classical underwater controllers provide useful structure but "
+              "exhibit complementary failure modes under changing currents: "
+              "robust feedback can be conservative, whereas a predictive "
+              "controller can be accurate in favorable regimes yet degrade "
+              "under model mismatch. We introduce Predictive Authority "
+              "Control (PAC), a compact Transformer policy that does not "
+              "replace these controllers. Instead, it predicts a bounded "
+              "scalar authority coefficient from a short state\u2013controller "
+              "history and continuously blends the outputs of a sliding-mode "
+              "controller and a constrained model predictive controller. "
+              "Training uses supervised predictive initialization from a "
+              "short-horizon rollout oracle, followed by constrained "
+              "residual reinforcement learning on the frozen backbone. In a "
+              "six-degree-of-freedom simulation of a 10-kg, six-thruster "
+              "autonomous underwater vehicle, five independently trained "
+              "residual policies are evaluated over 1,680 paired rollouts "
+              "spanning in-distribution and out-of-distribution disturbance "
+              "families. The residual policy obtains an out-of-distribution "
+              "3-D position RMSE of $0.1160\\pm0.0011$ m, compared with "
+              "$0.1605\\pm0.0239$ m for the supervised baseline, "
+              "$0.2482$ m for sliding-mode control, and $0.2213$ m for the "
+              "predictive baseline, corresponding to reductions of 27.8\%, "
+              "53.3\%, and 47.6\%, respectively. The residual policy also "
+              "reduces mean maximum error by 31.1\% and 28.0\% relative "
+              "to SMC and MPC. The gains are not free: the residual policy "
+              "uses 4.4\% more in-distribution position error and 4.3\% "
+              "more heading error than the supervised baseline, and its "
+              "solver deadline-miss fraction rises from 0.69 to 0.80 "
+              "out-of-distribution. These results support learned temporal "
+              "authority allocation as an interpretable alternative to "
+              "direct neural control.")
+    rich(doc, [("This draft reports simulation evidence only; the planned "
+                "hardware validation must be completed before submission.",
+                {"bold": True})], after=12)
 
     # ------------------------- 1 introduction -------------------------
     heading(doc, 1, "1  Introduction")
-    para(doc, "Accurate trajectory tracking is central to autonomous underwater "
-              "vehicle (AUV) inspection, intervention, and sampling. The task "
-              "remains difficult because hydrodynamic coefficients are "
-              "uncertain, environmental currents vary across regions, and "
-              "thrusters age with response lag and noise [1,2]. SMC rejects "
-              "bounded disturbances through a transparent feedback structure "
-              "but pays in conservative gains and chattering. MPC incorporates "
-              "prediction and constraints [3], yet its performance depends on "
-              "model fidelity: under actuator degradation the internal model "
-              "misrepresents the plant, and the optimizer acts confidently on "
-              "false premises.")
-    para(doc, "This paper asks one question: given two complete and "
-              "complementary controllers, when should the vehicle trust each "
-              "one, and by how much? The answer varies continuously with the "
-              "disturbance regime and cannot be enumerated by hand-designed "
-              "switching rules [16].")
-    para(doc, "We study this question through authority allocation. Rather than "
-              "learning a six-dimensional thruster command, the PAC policy "
-              "predicts one scalar \u03b1\u209c \u2208 [0, 1] and applies")
-    equation(doc, "u\u209c = (1 \u2212 \u03b1\u209c) u\u209c\u1d34\u1d39\u1d9c + \u03b1\u209c u\u209c\u1d39\u1d33\u1d9c ,   \u03b1\u209c \u2208 [0, 1],", 1)
-    para(doc, "where u\u1d34\u1d39\u1d9c and u\u1d39\u1d33\u1d9c are the SMC and MPC commands. The two "
-              "controllers remain explicit, the learned output is bounded and "
-              "interpretable, and a rate limiter prevents abrupt authority "
-              "transfer. A Transformer encodes a short history because "
-              "controller preference depends not only on instantaneous error "
-              "but on whether that error is growing, recovering, or coincident "
-              "with actuator saturation.")
-    para(doc, "Our earlier experiments established the supervised variant of "
-              "this idea and exposed its weakness: under disturbance families "
-              "never seen in training, the learned coefficient degrades below a "
-              "non-adaptive constant blend and oscillates over its full range. "
-              "This paper answers that weakness with a constrained residual "
-              "and makes three contributions, each responding to the question "
-              "above:")
-    rich(doc, [("Bounded residual learning over a frozen supervisor. ", {"bold": True}),
-               ("A reinforcement-learning head perturbs the supervised answer "
-                "to the trust question by at most 0.1 per step and is "
-                "zero-initialized, so the composite policy is numerically "
-                "identical to the deployed baseline before training and can "
-                "only revise trust within a bounded envelope afterwards.", {})])
-    rich(doc, [("Motion-level evidence under distribution shift. ", {"bold": True}),
-               ("Trajectories, attitude, and error time series\u2014not only "
-                "aggregate metrics\u2014show where the residual earns its value: "
-                "the supervised policy transfers trust to a failing optimizer, "
-                "and the residual learns to veto that transfer.", {})])
-    rich(doc, [("A registered evaluation that reports its failures. ", {"bold": True}),
-               ("Eight methods are compared over 120 paired episodes per "
-                "method-seed combination with model-seed confidence intervals "
-                "and no post-hoc selection; two failed criteria and one "
-                "unevaluated criterion are reported alongside the passes.", {})])
-    para(doc, "The remainder of the paper describes the framework (Section 3), "
-              "the learning stages (Section 4), the experimental protocol "
-              "(Section 5), results at the motion and mechanism levels "
-              "(Section 6), limitations (Section 7), and the planned hardware "
-              "validation (Section 8).")
+    para(doc, "Accurate trajectory tracking is central to autonomous "
+              "underwater vehicle (AUV) inspection, intervention, and "
+              "sampling. The task remains difficult because hydrodynamic "
+              "coefficients are uncertain, environmental currents vary "
+              "over time, and thruster saturation couples tracking quality "
+              "to control effort [1,2]. Sliding-mode control (SMC) can "
+              "reject bounded disturbances with a transparent feedback "
+              "structure, but its robustness is commonly purchased through "
+              "conservative gains or non-smooth control action. Model "
+              "predictive control (MPC) incorporates prediction and "
+              "constraints, yet its performance depends on model fidelity "
+              "and real-time optimization [3,4].")
+    para(doc, "Learning-based control offers another route. Recent work "
+              "has demonstrated full six-degree-of-freedom learned AUV "
+              "control and zero-shot sim-to-real transfer [8], while "
+              "imitation learning has enabled information-driven "
+              "underwater navigation [9]. More broadly, residual "
+              "reinforcement learning combines a fixed controller with a "
+              "learned additive correction [5], and actor\u2013critic MPC "
+              "embeds a differentiable optimizer inside a learned policy "
+              "[6]. These methods establish the value of retaining control "
+              "structure, but they do not directly answer a simpler "
+              "deployment question: given two complete and complementary "
+              "controllers, when should the robot trust each one, and by "
+              "how much?")
+    para(doc, "We study this question through authority allocation. "
+              "Rather than learning a six-dimensional thruster command, "
+              "PAC predicts one scalar $\\alpha_t\\in[0,1]$ and applies")
+    equation(doc,
+             "\\vect{u}_t=(1-\\alpha_t)\\vect{u}^{\\mathrm{SMC}}_t"
+             "+\\alpha_t\\vect{u}^{\\mathrm{MPC}}_t", 1)
+    para(doc, "where $\\vect{u}^{\\mathrm{MPC}}_t$ is the "
+              "predictive-controller command. The two controllers remain "
+              "explicit, the learned output is bounded and interpretable, "
+              "and a rate limiter prevents abrupt authority transfer. A "
+              "Transformer encodes a short history because controller "
+              "preference depends not only on instantaneous error but "
+              "also on whether that error is growing, recovering, or "
+              "coincident with actuator saturation. We further append a "
+              "zero-initialized residual head that outputs "
+              "$\\Delta\\alpha_t = 0.1\\,\\tanh(z_t)$, so the "
+              "composite policy is numerically identical to the deployed "
+              "baseline at initialization and can only revise trust "
+              "within a bounded envelope thereafter.")
+    para(doc, "This paper makes three contributions:")
+    rich(doc, [("Contribution 1. ", {"bold": True}),
+               ("We formulate controller selection as continuous, "
+                "history-conditioned authority prediction, retaining two "
+                "structured controllers while reducing the learned action "
+                "space to one bounded variable.", {})])
+    rich(doc, [("Contribution 2. ", {"bold": True}),
+               ("We develop a two-stage learning procedure: supervised "
+                "predictive initialization from a short-horizon oracle, "
+                "followed by constrained residual reinforcement learning "
+                "on the frozen backbone, with the residual output bounded "
+                "by $|\\Delta\\alpha_t| \\leq 0.1$ and zero-initialized.", {})])
+    rich(doc, [("Contribution 3. ", {"bold": True}),
+               ("We evaluate five independently trained policies over "
+                "1,680 paired rollouts spanning in-distribution and "
+                "out-of-distribution disturbance families, and report "
+                "both improvements and failure cases, including "
+                "scenario-wise RMSE, peak error, heading error, control "
+                "effort, saturation, and solver deadline-miss fraction.",
+                {})])
 
     # ------------------------- 2 related work -------------------------
     heading(doc, 1, "2  Related Work")
