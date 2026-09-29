@@ -28,8 +28,8 @@ LABEL = {"smc": "SMC", "mpc": "MPC", "constant_alpha": "Fixed $\\alpha$=0.5",
          "sspo": "SSPO", "v3_transformer": "Supervised PAC",
          "residual_rl": "Residual PAC"}
 COLOR = {"smc": "#514D83", "mpc": "#CC9429", "constant_alpha": "#8C9196",
-         "sspo": "#3F7E72", "v3_transformer": "#B6242E",
-         "residual_rl": "#6E141C"}
+         "sspo": "#3F7E72", "v3_transformer": "#E8730C",
+         "residual_rl": "#B6242E"}
 
 plt.rcParams.update({
     "font.family": "sans-serif",
@@ -131,7 +131,7 @@ def fig1_architecture():
         "#EFEDF5", edge="#514D83", lw=1.0)
     box(7.95, 5.25, 2.0, 1.15,
         "residual head  $\\Delta\\alpha$\nzero-init, $|\\Delta\\alpha|\\leq0.1$",
-        "#F7E9EA", edge="#B6242E", lw=1.1)
+        "#F7E9EA", edge="#E8730C", lw=1.1)
     box(7.95, 3.85, 2.0, 1.0, "safety filter\nclip / smooth / rate-limit",
         "#FFFFFF", edge="#333333")
     arrow(8.95, 6.7, 8.95, 6.4)
@@ -148,9 +148,9 @@ def fig1_architecture():
     # alpha out to blender
     ax.add_patch(FancyArrowPatch((7.9, 4.35), (6.4, 6.05),
                                  arrowstyle="-|>", mutation_scale=8,
-                                 color="#B6242E", linewidth=1.1,
+                                 color="#E8730C", linewidth=1.1,
                                  connectionstyle="arc3,rad=0.2"))
-    ax.text(7.5, 4.95, r"$\alpha_t$", fontsize=8, color="#B6242E",
+    ax.text(7.5, 4.95, r"$\alpha_t$", fontsize=8, color="#E8730C",
             ha="center", fontweight="bold")
 
     # ---------------- panel b: safety filter ----------------
@@ -205,10 +205,10 @@ def fig1_architecture():
                                   color="#333333", linewidth=0.9))
     boxc2 = FancyBboxPatch((0.7, 1.15), 8.6, 3.3,
                            boxstyle="round,pad=0.06,rounding_size=0.1",
-                           facecolor=TINT_R, edgecolor="#B6242E", linewidth=0.9)
+                           facecolor=TINT_R, edgecolor="#E8730C", linewidth=0.9)
     axc.add_patch(boxc2)
     axc.text(5.0, 3.55, "phase 2", fontsize=7.5, fontweight="bold",
-             ha="center", color="#B6242E")
+             ha="center", color="#E8730C")
     axc.text(5.0, 2.1, "constrained TD3 on frozen backbone\nbehavior regularization\n"
              r"$2\times10^{5}$ warm-start transitions", fontsize=6.8, ha="center",
              va="center", linespacing=1.3)
@@ -405,6 +405,9 @@ def fig2_trajectories():
         axes[1, c].plot(d0["target_x"], d0["target_y"], color="black", lw=0.8, ls="--")
         axes[0, c].set_title(title, fontsize=8.5, loc="center", pad=0)
         axes[0, c].view_init(elev=22, azim=-60)
+        axes[0, c].set_xlim(-3, 3)
+        axes[0, c].set_ylim(-2, 2)
+        axes[0, c].set_zlim(-1, 1)
         axes[0, c].tick_params(labelsize=6.5, pad=0)
         axes[0, c].set_box_aspect((3, 1.6, 1))
         axes[1, c].set_ylabel("y (m)")
@@ -511,14 +514,14 @@ def fig_network_training():
                                  linewidth=0.9, linestyle="--"))
     box(6.9, 1.45, 2.6, 1.35,
         "residual head: Linear 32$\\to$64\n(GELU) $\\to$ Linear 64$\\to$1\n"
-        "zero-init final layer", TINT_R, edge="#B6242E", lw=1.0)
+        "zero-init final layer", TINT_R, edge="#E8730C", lw=1.0)
     arrow(6.5, 2.1, 6.9, 2.1)
     box(9.9, 1.45, 2.0, 1.35,
         "$\\Delta\\alpha=0.1\\,$tanh$(\\cdot)$\n$|\\Delta\\alpha|\\leq0.1$",
-        TINT_R, edge="#B6242E")
+        TINT_R, edge="#E8730C")
     arrow(9.5, 2.1, 9.9, 2.1)
     ax.text(8.2, 1.05, "trainable, 2,177 params", fontsize=6.2, ha="center",
-            color="#B6242E")
+            color="#E8730C")
     ax.text(6.9, 2.95, "\u2744  frozen token path", fontsize=6.0,
             color="#8C9196")
 
@@ -527,7 +530,7 @@ def fig_network_training():
                                  mutation_scale=8, color="#514D83",
                                  linewidth=0.9, connectionstyle="arc3,rad=0.2"))
     ax.add_patch(FancyArrowPatch((11.9, 2.8), (11.4, 3.5), arrowstyle="-|>",
-                                 mutation_scale=8, color="#B6242E",
+                                 mutation_scale=8, color="#E8730C",
                                  linewidth=0.9))
     box(9.9, 3.55, 2.0, 1.0,
         "$\\alpha_t=\\mathrm{clip}_{[0,1]}(\\hat{\\alpha}+\\Delta\\alpha)$",
@@ -560,11 +563,11 @@ def fig_network_training():
                                   linewidth=0.9))
     boxb2 = FancyBboxPatch((0.6, 1.2), 8.8, 3.4,
                            boxstyle="round,pad=0.06,rounding_size=0.1",
-                           facecolor=TINT_R, edgecolor="#B6242E",
+                           facecolor=TINT_R, edgecolor="#E8730C",
                            linewidth=0.9)
     axb.add_patch(boxb2)
     axb.text(5.0, 3.9, "phase 2  residual TD3", fontsize=7.5,
-             fontweight="bold", ha="center", color="#B6242E")
+             fontweight="bold", ha="center", color="#E8730C")
     axb.text(5.0, 2.3, "frozen backbone, twin critics,\nbehavior regularization, "
              "$2\\times10^{5}$ warm-start\ntransitions, 5 model seeds",
              fontsize=6.8, ha="center", va="center", linespacing=1.3)
@@ -575,87 +578,117 @@ def fig_network_training():
 
 # ================================================================ training curves
 def fig_training_curves():
+    """Three-panel training curves: reward, critic loss, actor loss."""
     hist_dir = ROOT / "runs" / "predictive_authority_v4" / "rl-round1"
-    fig, ax = plt.subplots(figsize=(7.2, 2.6))
-    panel_letter(ax, "a")
     seeds = (31000, 31001, 31002, 31003, 31004)
     frames = []
     for seed in seeds:
         h = pd.read_csv(hist_dir / f"training_history_seed_{seed}.csv")
         frames.append(h)
-        ax.plot(h["env_steps"] / 1e5, h["mean_episode_reward"], lw=0.7,
-                color="#8C9196", alpha=0.65, zorder=2)
-    steps = frames[0]["env_steps"] / 1e5
-    mean = np.mean([f["mean_episode_reward"].to_numpy() for f in frames], axis=0)
-    ax.plot(steps, mean, lw=1.8, color="#B6242E", zorder=3,
-            label="5-seed mean")
-    ax.set_xlabel("environment steps ($10^5$)")
-    ax.set_ylabel("mean episode reward")
-    ax.legend(loc="lower right", fontsize=7.5)
-    ax.grid(True, color="#E3E6EA", linewidth=0.55)
-    ax.spines[["top", "right"]].set_visible(False)
-    fig.tight_layout()
+    steps = frames[0]["env_steps"].to_numpy() / 1e5
+
+    fig, axes = plt.subplots(1, 3, figsize=(7.2, 2.5))
+    metrics = [
+        ("mean_episode_reward", "episode reward", 0),
+        ("critic_loss", "critic loss", 1),
+        ("actor_loss", "actor loss", 2),
+    ]
+    for ax, (col, label, idx) in zip(axes, metrics):
+        panel_letter(ax, chr(ord("a") + idx))
+        data = np.array([f[col].to_numpy() for f in frames])
+        mean = data.mean(axis=0)
+        sd = data.std(axis=0)
+        ax.fill_between(steps, mean - sd, mean + sd, alpha=0.18,
+                        color="#E8730C", linewidth=0, zorder=1)
+        for k in range(len(seeds)):
+            ax.plot(steps, data[k], lw=0.5, color="#E8730C", alpha=0.4,
+                    zorder=2)
+        ax.plot(steps, mean, lw=1.6, color="#E8730C", zorder=3,
+                label="mean $\pm$ 1 sd")
+        ax.set_xlabel("env steps ($10^5$)")
+        ax.set_title(label, fontsize=8)
+        if idx == 0:
+            ax.legend(loc="lower right", fontsize=6.5)
+        ax.grid(True, color="#E3E6EA", linewidth=0.4, alpha=0.7)
+        ax.spines[["top", "right"]].set_visible(False)
+        ax.tick_params(labelsize=6.5)
+    fig.tight_layout(w_pad=1.5)
     save(fig, "fig_training_curves")
 
 
-# ================================================================ alpha distribution panel
 def alpha_distribution_axis(ax):
+    """Box plot of per-episode mean alpha."""
     raw = pd.read_csv(STAGE2 / "raw_metrics.csv")
     ood = raw[raw["block"] == "unseen"]
     groups = [("v3_transformer", "Supervised PAC", COLOR["v3_transformer"]),
-              ("residual_rl", "Residual PAC", COLOR["residual_rl"])]
-    rng = np.random.default_rng(0)
-    for i, (m, lab, col) in enumerate(groups):
-        vals = ood[ood["method"] == m]["authority_alpha_mean"].to_numpy()
-        x = rng.normal(i, 0.055, size=len(vals))
-        ax.scatter(x, vals, s=7, color=col, alpha=0.55, linewidths=0,
-                   zorder=3, label=lab)
-        ax.hlines(np.mean(vals), i - 0.22, i + 0.22, color=col, lw=1.6,
-                  zorder=4)
-    ax.axhline(0.5, color="#777777", lw=0.8, ls="--", alpha=0.8)
-    ax.text(1.42, 0.505, "fixed blend 0.5", fontsize=6.4, color="#555555",
-            ha="right")
-    ax.set_xticks([0, 1], ["Supervised PAC", "Residual PAC"], fontsize=7.5)
+              ("residual_rl", "Residual PAC", COLOR["residual_rl"]),
+              ("constant_alpha", "Fixed $\\alpha$=0.5", COLOR["constant_alpha"])]
+    data, labels, cols = [], [], []
+    for m, lab, col in groups:
+        data.append(ood[ood["method"] == m]["authority_alpha_mean"].to_numpy())
+        labels.append(lab)
+        cols.append(col)
+    bp = ax.boxplot(data, positions=range(len(groups)), widths=0.5,
+                    patch_artist=True, showfliers=True,
+                    flierprops=dict(marker="o", markersize=3,
+                                    markerfacecolor="#8C9196",
+                                    markeredgecolor="none", alpha=0.5),
+                    medianprops=dict(color="#333333", linewidth=1.2),
+                    whiskerprops=dict(color="#555555", linewidth=0.7),
+                    capprops=dict(color="#555555", linewidth=0.7))
+    for patch, col in zip(bp["boxes"], cols):
+        patch.set_facecolor(col)
+        patch.set_alpha(0.65)
+        patch.set_edgecolor(col)
+    ax.axhline(0.5, color="#777777", lw=0.7, ls="--", alpha=0.7, zorder=0)
+    ax.set_xticks(range(len(groups)), labels, fontsize=7)
     ax.set_ylabel("per-episode mean $\\alpha$")
     ax.set_ylim(0.2, 1.02)
-    ax.grid(True, axis="y", color="#E3E6EA", linewidth=0.55)
+    ax.grid(True, axis="y", color="#E3E6EA", linewidth=0.4, alpha=0.7)
     ax.spines[["top", "right"]].set_visible(False)
+    ax.tick_params(labelsize=6.5)
 
 
-# ================================================================ control quality
 def fig_control_quality():
+    """Control quality: grouped bars styled after the v2 reference figures."""
     ovd = pd.read_csv(STAGE2 / "overall_summary.csv")
-    fig, axes = plt.subplots(1, 3, figsize=(7.2, 2.7), sharey=False)
-    panel_letter(axes[0], "a")
+    fig, axes = plt.subplots(1, 3, figsize=(7.2, 2.6))
     metrics = [
-        ("applied_control_cost", "control cost", False),
-        ("action_saturation_step_fraction", "saturation step fraction", True),
-        ("actuator_rate_limit_episode_mean", "rate-limit activation", True),
+        ("applied_control_cost", "control cost", 0),
+        ("action_saturation_step_fraction", "saturation fraction", 1),
+        ("actuator_rate_limit_episode_mean", "rate-limit activation", 2),
     ]
     x = np.arange(len(METHODS))
     w = 0.38
-    for ax, (col, label, small) in zip(axes, metrics):
+    short = {"smc": "SMC", "mpc": "MPC", "constant_alpha": "Fixed\n$\\alpha$",
+             "sspo": "SSPO", "v3_transformer": "Sup.\nPAC",
+             "residual_rl": "Res.\nPAC"}
+    for ax, (col, label, idx) in zip(axes, metrics):
+        panel_letter(ax, chr(ord("a") + idx))
         for k, block in enumerate(("seen", "unseen")):
-            means, sds = [], []
+            vals, sds = [], []
             for m in METHODS:
                 d = ovd[(ovd["method"] == m) & (ovd["block"] == block)][col]
-                means.append(d.mean())
+                vals.append(d.mean())
                 sds.append(d.std(ddof=1) if len(d) > 1 else 0.0)
-            ax.bar(x + (k - 0.5) * w, means, w,
-                   color=["#8B87C8", "#B6242E"][k],
-                   label=("ID" if k == 0 else "OOD"),
-                   yerr=np.array(sds) * (0.0 if small else 1.0),
-                   error_kw=dict(lw=0.7, capsize=1.5), zorder=3)
-        ax.set_xticks(x, [LABEL[m].replace("Supervised PAC", "Sup. PAC")
-                          .replace("Residual PAC", "Res. PAC")
-                          .replace("Fixed $\\alpha$=0.5", "Fixed $\\alpha$")
-                          for m in METHODS], rotation=45, ha="right",
-                      fontsize=6.2)
+            bars = ax.bar(x + (k - 0.5) * w, vals, w,
+                          color=["#8B87C8", "#B6242E"][k],
+                          label=("ID" if k == 0 else "OOD"),
+                          zorder=3, edgecolor="white", linewidth=0.4)
+            ax.errorbar(x + (k - 0.5) * w, vals,
+                        yerr=np.array(sds), fmt="none",
+                        ecolor="#555555", elinewidth=0.6, capsize=1.5,
+                        zorder=4)
+        ax.set_xticks(x, [short.get(m, LABEL[m][:8]) for m in METHODS],
+                      fontsize=5.8)
         ax.set_title(label, fontsize=8)
-        ax.grid(True, axis="y", color="#E3E6EA", linewidth=0.55)
+        ax.grid(True, axis="y", color="#E3E6EA", linewidth=0.4, alpha=0.7,
+                zorder=0)
+        ax.set_axisbelow(True)
         ax.spines[["top", "right"]].set_visible(False)
-    axes[0].legend(fontsize=7, loc="upper left")
-    fig.tight_layout()
+        ax.tick_params(labelsize=6.2)
+    axes[0].legend(fontsize=6.5, loc="upper left", framealpha=0.9)
+    fig.tight_layout(w_pad=1.5)
     save(fig, "fig_control_quality")
 
 

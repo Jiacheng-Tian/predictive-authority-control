@@ -535,13 +535,15 @@ def build():
               "behavior in the registered evaluation (Fig. 6, Table 1), "
               "which is the performance measure of record.")
     figure(doc, "fig_training_curves",
-           "Residual training across the five model seeds. Thin lines: "
-           "per-seed mean episode reward under exploration noise on the "
-           "rotating training-family schedule (the trend reflects the "
-           "changing episode mix, not greedy-policy performance); bold "
-           "line: five-seed mean. No seed diverges; greedy closed-loop "
-           "performance is the registered evaluation of Fig. 6 and "
-           "Table 1.")
+           "Residual training across the five model seeds. (a) Episode "
+           "reward, (b) critic loss, (c) actor loss. Thin lines: "
+           "per-seed values; bold line and shaded band: five-seed "
+           "mean $\\pm$ 1 sd. All metrics are collected under "
+           "exploration noise on the rotating training-family "
+           "schedule, so trends reflect the changing episode mix "
+           "rather than greedy-policy performance; no seed diverges. "
+           "Greedy closed-loop performance is the registered "
+           "evaluation of Fig. 6 and Table 1.")
     rows = []
     for m in METHOD_ORDER:
         rows.append([
@@ -634,8 +636,9 @@ def build():
            "Actuator-degradation episode (held-out seed 43000, fixed before "
            "inspection; family means superposed as text). (a) Position error. "
            "(b) Authority coefficient in the representative episode. "
-           "(c) Per-episode mean authority over all 35 OOD episodes and "
-           "five seeds (175 points per method; bars mark means). Family-mean "
+           "(c) Box plots of per-episode mean authority over all 35 OOD "
+           "episodes and five seeds (175 points per method; boxes: "
+           "IQR, whiskers: range, line: median). Family-mean "
            "coefficients: 0.63 (supervised) versus 0.50 (residual).")
     heading(doc, 2, "6.4  Control quality: the gain is not purchased with actuator abuse")
     para(doc, "On the OOD block the residual policy attains the lowest "
@@ -650,10 +653,11 @@ def build():
               "must not be purchased with heading, saturation, or "
               "constraint degradation (Fig. 8).")
     figure(doc, "fig_control_quality",
-           "Control quality by method and block (bars: five-seed means). "
-           "(a) Applied control cost. (b) Saturation-step fraction. "
-           "(c) Rate-limit activation. The residual policy attains the "
-           "lowest OOD saturation and control cost of all methods.")
+           "Control quality by method and block (bars: five-seed means "
+           "$\\pm$ sd). (a) Applied control cost. (b) Saturation-step "
+           "fraction. (c) Rate-limit activation. The residual policy "
+           "attains the lowest OOD saturation and control cost of "
+           "all methods.")
     heading(doc, 2, "6.5  The price of the gain")
     para(doc, "Two costs accompany the OOD gain. In-distribution position and "
               "heading error increase as quantified above. And the solver "
