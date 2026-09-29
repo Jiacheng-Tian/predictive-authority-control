@@ -402,13 +402,13 @@ def build():
               "backbone is frozen throughout phase 2, and the residual head is "
               "zero-initialized, so the composite policy starts exactly at the "
               "supervised baseline.")
-    figure(doc, "fig1_system_architecture",
+    figure(doc, "fig1_system_architecture_ai",
            "Predictive authority control architecture. (a) Closed loop: the "
            "experts generate commands blended by \u03b1; a frozen temporal encoder "
            "predicts the supervised coefficient and a bounded, zero-initialized "
            "residual head revises it. (b) Layered safety filter in execution order. "
            "(c) Two-phase training.")
-    figure(doc, "fig_network_training",
+    figure(doc, "fig_network_training_ai",
            "Network architectures and two-phase training. (a) The frozen "
            "temporal encoder (14,113 parameters) maps a 16\u00d724 history "
            "through a 32-dimensional embedding and one Transformer encoder "
@@ -509,7 +509,7 @@ def build():
            "lowest-numbered held-out seed of each block, fixed before "
            "inspection); both episodes are shared across methods and "
            "regenerated deterministically from the frozen checkpoints. "
-           "Rows: three-dimensional path, horizontal projection, vertical "
+           "Rows: three-dimensional path, horizontal projection, z-axis "
            "tracking error (dashed line, zero). The fixed blend is omitted "
            "for legibility; its values appear in Table 1.")
     para(doc, "Figure 4 resolves the same episodes in time. The position-error "

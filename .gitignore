@@ -13,6 +13,7 @@ paper/*
 !paper/build_manuscript_draft_cn.py
 !paper/build_manuscript_figures.py
 !paper/build_hero_figures.py
+!paper/build_template_deck.py
 !paper/collect_case_study.py
 !paper/collect_trajectory_case.py
 !paper/manuscript_figures
@@ -22,6 +23,8 @@ paper/data/*
 !paper/data/trajectory_cases.csv
 !paper/data/case_actuator_delay.csv
 !paper/PAC_manuscript_draft_v2.docx
+!paper/PAC_manuscript_draft_CN_latest.docx
+!paper/PAC_组会答辩_20260929.pptx
 !paper/PAC_manuscript_draft_CN_v2.docx
 runs/
 build/
