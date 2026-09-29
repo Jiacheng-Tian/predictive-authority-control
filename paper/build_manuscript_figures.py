@@ -418,7 +418,7 @@ def fig2_trajectories():
         axes[1, c].set_ylabel("y (m)")
         axes[1, c].set_xlabel("x (m)")
         axes[2, c].axhline(0, color="#777777", lw=0.7, ls="--", alpha=0.7)
-        axes[2, c].set_ylabel("vertical error (m)")
+        axes[2, c].set_ylabel("z error (m)")
         axes[2, c].set_xlabel("time (s)")
         for r in (1, 2):
             axes[r, c].grid(True, color="#E3E6EA", linewidth=0.55)
