@@ -387,10 +387,12 @@ def fig2_trajectories():
     case = pd.read_csv(ROOT / "paper" / "data" / "trajectory_cases.csv")
     show = ["smc", "mpc", "v3_transformer", "residual_rl"]
     cols = [("seen", "ID sinusoidal current"), ("unseen", "OOD actuator degradation")]
-    fig = plt.figure(figsize=(7.2, 6.2))
-    ax3d = [fig.add_subplot(3, 2, 1 + c, projection="3d") for c in range(2)]
-    axes = np.array(ax3d + [fig.add_subplot(3, 2, 3 + c) for c in range(2)]
-                    + [fig.add_subplot(3, 2, 5 + c) for c in range(2)]).reshape(3, 2)
+    fig = plt.figure(figsize=(7.2, 7.0))
+    gs = fig.add_gridspec(3, 2, height_ratios=[2.2, 1.0, 1.0], hspace=0.20,
+                          wspace=0.28)
+    ax3d = [fig.add_subplot(gs[0, c], projection="3d") for c in range(2)]
+    axes = np.array(ax3d + [fig.add_subplot(gs[1, c]) for c in range(2)]
+                    + [fig.add_subplot(gs[2, c]) for c in range(2)]).reshape(3, 2)
     for c, (block, title) in enumerate(cols):
         for m in show:
             d = case[(case["block"] == block) & (case["method"] == m)].sort_values("time")
@@ -408,8 +410,11 @@ def fig2_trajectories():
         axes[0, c].set_xlim(-3, 3)
         axes[0, c].set_ylim(-2, 2)
         axes[0, c].set_zlim(-1, 1)
-        axes[0, c].tick_params(labelsize=6.5, pad=0)
-        axes[0, c].set_box_aspect((3, 1.6, 1))
+        axes[0, c].set_xticks([-3, -2, -1, 0, 1, 2, 3])
+        axes[0, c].set_yticks([-2, -1, 0, 1, 2])
+        axes[0, c].set_zticks([-1, -0.5, 0, 0.5, 1])
+        axes[0, c].tick_params(labelsize=7, pad=0)
+        axes[0, c].set_box_aspect((3, 2, 1))
         axes[1, c].set_ylabel("y (m)")
         axes[1, c].set_xlabel("x (m)")
         axes[2, c].axhline(0, color="#777777", lw=0.7, ls="--", alpha=0.7)
