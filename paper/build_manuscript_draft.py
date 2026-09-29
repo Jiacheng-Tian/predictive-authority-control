@@ -621,7 +621,12 @@ def build():
            "exploration noise on the rotating training-family "
            "schedule, so trends reflect the changing episode mix "
            "rather than greedy-policy performance; no seed diverges. "
-           "Greedy closed-loop performance is the registered "
+           "The losses are regressions onto a moving TD target that is "
+           "recomputed from tracking networks at every update, so their "
+           "magnitudes track the growing value scale of that target rather "
+           "than divergence; the actor loss is dominated by the negative "
+           "action value, whose scale inflates with the critic. Greedy "
+           "closed-loop performance is the registered "
            "evaluation of Fig. 6 and Table 1.")
     rows = []
     for m in METHOD_ORDER:

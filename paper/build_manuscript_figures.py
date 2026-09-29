@@ -594,7 +594,7 @@ def fig_training_curves():
 
     fig, axes = plt.subplots(1, 3, figsize=(7.2, 2.5))
     metrics = [
-        ("mean_episode_reward", "episode reward", 0),
+        ("mean_episode_reward", "training episode reward", 0),
         ("critic_loss", "critic loss", 1),
         ("actor_loss", "actor loss", 2),
     ]
