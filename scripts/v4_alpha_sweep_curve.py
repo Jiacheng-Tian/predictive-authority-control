@@ -69,7 +69,10 @@ def main(argv: list[str] | None = None) -> int:
     if raw["alpha"].isna().any():
         raise ValueError("unexpected methods present in the sweep inputs")
     episode_counts = raw.groupby(["method", "block"]).size()
-    if not (episode_counts == 120).all():
+    expected = {"seen": 85, "unseen": 35}
+    if not all(
+            count == expected[block]
+            for (_, block), count in episode_counts.items()):
         raise ValueError(f"sweep grid incomplete:\n{episode_counts}")
 
     summary = (
