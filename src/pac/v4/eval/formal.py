@@ -261,11 +261,11 @@ class MethodFactory:
 
             if self.direct_rl_dir is None:
                 raise ValueError("direct_rl method requires a checkpoint directory")
-            policy = load_direct_rl_checkpoint(
+            direct_policy, _metadata = load_direct_rl_checkpoint(
                 self.direct_rl_dir / f"direct_rl_seed_{int(model_seed)}.pt",
                 expected_model_seed=int(model_seed),
             )
-            policy = DirectLivePolicy(policy, explore_std=0.0, seed=0)
+            policy = DirectLivePolicy(direct_policy, explore_std=0.0, seed=0)
         elif method in ("residual_rl", "wm_residual_rl"):
             from pac.authority.model import load_alpha_model_checkpoint
             from pac.v4.rl.policy import load_rl_checkpoint

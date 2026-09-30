@@ -86,6 +86,42 @@ class ConstantAlphaPolicyResolutionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             factory.policy_for("constant_alpha_1.5", None)
 
+    def test_direct_rl_resolves_to_live_policy(self):
+        """Regression: the checkpoint loader returns (policy, metadata)."""
+        import tempfile
+
+        import torch
+
+        from pac.v4.eval.formal import MethodFactory
+        from pac.v4.rl.direct import (
+            DirectLivePolicy,
+            DirectRLPolicy,
+            save_direct_rl_checkpoint,
+        )
+
+        config = load_v4_config(_CONFIG_PATH)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            seed = int(config.seeds.model[0])
+            policy = DirectRLPolicy(int(config.authority_model.history_len))
+            save_direct_rl_checkpoint(
+                Path(temp_dir) / f"direct_rl_seed_{seed}.pt",
+                policy,
+                model_seed=seed,
+                reward_version=str(config.reward.version),
+                training_summary={"env_steps": 1},
+            )
+            factory = MethodFactory(
+                config, rl_dir=Path("."), wm_rl_dir=Path("."),
+                wm_checkpoint=Path("."), dataset_dir=Path("."),
+                sspo_schedule=None, include_wm_rl=False,
+                direct_rl_dir=Path(temp_dir),
+            )
+            live = factory.policy_for("direct_rl", seed)
+            self.assertIsInstance(live, DirectLivePolicy)
+            self.assertIsInstance(live.policy, DirectRLPolicy)
+            action = live.policy(torch.randn(2, 16, 24))
+            self.assertEqual(tuple(action.shape), (2, 6))
+
 
 if __name__ == "__main__":
     unittest.main()
