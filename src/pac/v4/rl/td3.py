@@ -11,6 +11,7 @@ updates) with two v4-specific constraints:
 
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass
 from typing import Any
 
@@ -160,8 +161,12 @@ class TD3Trainer:
             device: torch.device,
             seed: int):
         self.policy = policy.to(device)
+        # The target actor must own an independent copy of the backbone:
+        # sharing the module object made the soft update alias target and
+        # source onto the same tensors, scaling the frozen weights by
+        # (1 - tau^2) on every delayed update (~0.0825x after round 1).
         self.policy_target = type(policy)(
-            policy.backbone,
+            copy.deepcopy(policy.backbone),
             delta_max=policy.delta_max,
             lambda_blend=policy.lambda_blend,
             wm_feature_dim=policy.wm_feature_dim,
@@ -260,7 +265,9 @@ class TD3Trainer:
             for target, source in zip(
                     self.policy_target.parameters(), self.policy.parameters()
             ):
-                if source.requires_grad or target.shape == source.shape:
+                # Only trainable actor parameters are tracked: frozen
+                # backbone blocks must stay identical to the checkpoint.
+                if source.requires_grad:
                     target.mul_(1.0 - self.tau).add_(self.tau * source)
 
 

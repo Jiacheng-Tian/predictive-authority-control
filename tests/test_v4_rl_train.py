@@ -206,6 +206,98 @@ class TD3TrainerTests(unittest.TestCase):
         self.assertTrue(torch.isfinite(delta).all())
 
 
+class TargetBackboneDecouplingTests(unittest.TestCase):
+    """Regression tests for the round-1 backbone decay bug.
+
+    The target actor used to share the online backbone module object, so
+    the soft update aliased target and source onto the same tensors and
+    scaled every frozen weight by (1 - tau^2) on each delayed update
+    (empirically 0.0825x after the 200k-step round 1).  The contract
+    under test: after 1000 gradient updates every backbone tensor — in
+    the online policy and in the target — is bitwise unchanged.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.config = load_v4_config(_CONFIG_PATH)
+        cls.backbone, _meta = load_alpha_model_checkpoint(
+            Path(cls.config.backbone.checkpoint_dir)
+            / "pac_train_seed_31000"
+            / "checkpoint.pt"
+        )
+
+    def test_backbone_bitwise_stable_after_1000_updates(self):
+        policy = ResidualAlphaPolicy(
+            self.backbone,
+            delta_max=self.config.rl.delta_max,
+            lambda_blend=self.config.rl.lambda_blend,
+        )
+        before = {
+            key: value.detach().clone()
+            for key, value in policy.backbone.state_dict().items()
+        }
+        # The target must own distinct tensors from the online backbone.
+        trainer = TD3Trainer(
+            policy,
+            gamma=self.config.rl.gamma,
+            tau=self.config.rl.tau,
+            policy_delay=self.config.rl.policy_delay,
+            target_noise=self.config.rl.target_noise,
+            noise_clip=self.config.rl.noise_clip,
+            behavior_reg=self.config.rl.behavior_reg,
+            actor_lr=self.config.rl.actor_lr,
+            critic_lr=self.config.rl.critic_lr,
+            history_len=self.config.authority_model.history_len,
+            wm_feature_dim=0,
+            device=torch.device("cpu"),
+            seed=self.config.seeds.model[0],
+        )
+        online = dict(policy.backbone.named_parameters())
+        target = dict(trainer.policy_target.backbone.named_parameters())
+        for name, parameter in online.items():
+            self.assertIsNot(
+                parameter, target[name],
+                f"target backbone parameter {name} aliases the online tensor",
+            )
+
+        rng = np.random.default_rng(7)
+        count = 512
+        windows = rng.normal(0, 0.3, size=(count, 16, 24)).astype(np.float32)
+        replay = ReplayBuffer(count, 16, 0)
+        replay.extend({
+            "windows": windows,
+            "next_windows": windows,
+            "actions": rng.uniform(-0.1, 0.1, size=count).astype(np.float32),
+            "rewards": rng.uniform(-2, 0, size=count).astype(np.float32),
+            "dones": np.zeros(count, dtype=np.float32),
+        })
+        for _ in range(1000):
+            batch = replay.sample(64, trainer.generator)
+            trainer.update(batch)
+
+        after = policy.backbone.state_dict()
+        self.assertEqual(set(after), set(before))
+        for key, reference in before.items():
+            torch.testing.assert_close(
+                after[key], reference,
+                msg=f"backbone tensor {key} changed during training",
+            )
+        target_after = trainer.policy_target.backbone.state_dict()
+        for key, reference in before.items():
+            torch.testing.assert_close(
+                target_after[key], reference,
+                msg=f"target backbone tensor {key} drifted from the checkpoint",
+            )
+        # Sanity: the frozen-backbone deployment alpha must be identical
+        # to the backbone's own output on fresh inputs.
+        probe = torch.from_numpy(
+            rng.normal(0, 0.3, size=(8, 16, 24)).astype(np.float32)
+        )
+        torch.testing.assert_close(
+            policy.backbone_alpha(probe), policy.backbone(probe)
+        )
+
+
 class TrainingCollectionTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
