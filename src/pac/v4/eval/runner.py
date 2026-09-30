@@ -355,26 +355,36 @@ def run_v4_policy_episode(
             wm=wm_advice,
         )
 
-        alpha_raw = float(policy.select_alpha(context))
-        if policy.direct_action:
-            action = np.asarray(
-                primary_action if policy.alpha == 0.0 else authority_action,
-                dtype=float,
-            ).reshape(6)
+        # Direct-RL policies expose select_action (6-dim thruster command,
+        # no alpha stack, no forced-primary override); fixed controllers
+        # keep the legacy direct path below.
+        select_action = getattr(policy, "select_action", None)
+        if select_action is not None:
+            alpha_raw = 0.0
+            action = np.asarray(select_action(context), dtype=float).reshape(6)
             action = np.clip(action, -1.0, 1.0)
-            alpha = 0.0 if policy.alpha == 0.0 else 1.0
+            alpha = 0.0
         else:
-            alpha = float(np.clip(alpha_raw * float(config.authority_model.alpha_gain), 0.0, 1.0))
-            if alpha < 0.0:
-                alpha = 0.0
-            alpha = filter_authority_alpha(
-                alpha,
-                previous_alpha,
-                smoothing=float(config.authority_model.alpha_smoothing),
-                rate_limit=float(config.authority_model.alpha_rate_limit),
-                deadband=float(config.authority_model.alpha_deadband),
-            )
-        if authority_forced_primary:
+            alpha_raw = float(policy.select_alpha(context))
+            if policy.direct_action:
+                action = np.asarray(
+                    primary_action if policy.alpha == 0.0 else authority_action,
+                    dtype=float,
+                ).reshape(6)
+                action = np.clip(action, -1.0, 1.0)
+                alpha = 0.0 if policy.alpha == 0.0 else 1.0
+            else:
+                alpha = float(np.clip(alpha_raw * float(config.authority_model.alpha_gain), 0.0, 1.0))
+                if alpha < 0.0:
+                    alpha = 0.0
+                alpha = filter_authority_alpha(
+                    alpha,
+                    previous_alpha,
+                    smoothing=float(config.authority_model.alpha_smoothing),
+                    rate_limit=float(config.authority_model.alpha_rate_limit),
+                    deadband=float(config.authority_model.alpha_deadband),
+                )
+        if authority_forced_primary and select_action is None:
             alpha = 0.0
             action = np.asarray(primary_action, dtype=float).reshape(6)
             action = np.clip(action, -1.0, 1.0)

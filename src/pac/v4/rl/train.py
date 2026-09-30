@@ -18,6 +18,7 @@ from pac.v4.rl.policy import (
     ResidualAlphaPolicy,
     load_rl_checkpoint,
     save_rl_checkpoint,
+    unfreeze_round2_blocks,
 )
 from pac.v4.rl.td3 import ReplayBuffer, TD3Trainer
 from pac.v4.rl.warmstart import materialize_warmstart
@@ -80,19 +81,27 @@ def train_residual_rl(
         )
         wm_dim = 5
 
+    if round_index == 2 and resume_checkpoint is None:
+        raise ValueError("round 2 continues from a round-1 checkpoint: "
+                         "pass resume_checkpoint")
     if resume_checkpoint is not None:
         policy, _resume_metadata = load_rl_checkpoint(
             resume_checkpoint, backbone=backbone, expected_model_seed=model_seed
         )
+        if round_index != 1:
+            # Round-1 checkpoints load fully frozen; thaw exactly the
+            # blocks listed in rl.unfreeze_blocks_round2.
+            unfreeze_round2_blocks(policy, rl.unfreeze_blocks_round2)
     else:
         policy = ResidualAlphaPolicy(
             backbone,
             delta_max=float(rl.delta_max),
             lambda_blend=float(rl.lambda_blend),
             wm_feature_dim=wm_dim,
-            freeze_backbone=bool(rl.freeze_backbone_round1) if round_index == 1
-            else False,
+            freeze_backbone=bool(rl.freeze_backbone_round1),
         )
+        if round_index != 1:
+            unfreeze_round2_blocks(policy, rl.unfreeze_blocks_round2)
     if int(policy.wm_feature_dim) != wm_dim:
         raise ValueError("resumed policy wm_feature_dim does not match this run")
 
@@ -253,6 +262,13 @@ def train_residual_rl(
             "behavior_reg": float(rl.behavior_reg),
             "expl_noise": float(rl.expl_noise),
             "device": str(resolved_device),
+            "unfreeze_blocks": (
+                list(rl.unfreeze_blocks_round2)
+                if round_index != 1 else []
+            ),
+            "resume_checkpoint": (
+                str(resume_checkpoint) if resume_checkpoint else "none"
+            ),
         },
     )
     summary["checkpoint_path"] = str(checkpoint_path)

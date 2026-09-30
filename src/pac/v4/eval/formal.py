@@ -34,6 +34,7 @@ from pac.v4.eval.runner import (
 )
 
 FORMAL_METHODS_FIXED = ("smc", "mpc", "constant_alpha", "sspo")
+_ALPHA_PROBE_METHODS = ("constant_alpha_0.25", "constant_alpha_0.75")
 LEARNED_METHODS = ("v3_transformer", "wm_hybrid", "residual_rl", "wm_residual_rl")
 METRIC_COLUMNS = (
     "rmse_3d",
@@ -64,6 +65,7 @@ METRIC_ALIASES = {
     "success_1m": "success_1.0m",
 }
 _RUN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
+_CONSTANT_ALPHA_RE = re.compile(r"^constant_alpha_(\d+(?:\.\d+)?)$")
 _T_CRIT_4 = 2.7764451051977987
 
 
@@ -141,20 +143,52 @@ def build_task_spec(config, task: EpisodeTask):
     )
 
 
-def method_grid(config, *, include_wm_rl: bool) -> list[dict]:
-    """Enumerate (method, model_seed) combos for the formal run."""
-    combos: list[dict] = [
+def method_grid(config, *, include_wm_rl: bool, alpha_sweep: bool = False,
+                include_direct_rl: bool = False,
+                methods: list[str] | tuple[str, ...] | None = None) -> list[dict]:
+    """Enumerate (method, model_seed) combos for the formal run.
+
+    ``alpha_sweep`` adds the two supplementary fixed-alpha probes
+    (0.25/0.75) used only by the preregistered RMSE-alpha sweep run; it is
+    off by default so the main grid keeps its frozen 24-combo protocol.
+    ``methods`` overrides the enumeration entirely: exactly those methods
+    are evaluated (fixed methods once, learned/direct methods per model
+    seed), which supports cheap supplementary runs such as the 2x120
+    alpha sweep.
+    """
+    if methods is not None:
+        combos: list[dict] = []
+        for name in methods:
+            if name in FORMAL_METHODS_FIXED or name in _ALPHA_PROBE_METHODS:
+                combos.append({"method": name, "model_seed": None})
+            elif name in ("v3_transformer", "wm_hybrid", "residual_rl",
+                          "direct_rl"):
+                for seed in config.seeds.model:
+                    combos.append({"method": name, "model_seed": int(seed)})
+            elif name == "wm_residual_rl":
+                for seed in config.seeds.model:
+                    combos.append({"method": name, "model_seed": int(seed)})
+            else:
+                raise ValueError(f"unknown formal method: {name}")
+        return combos
+    combos = [
         {"method": "smc", "model_seed": None},
         {"method": "mpc", "model_seed": None},
         {"method": "constant_alpha", "model_seed": None},
-        {"method": "sspo", "model_seed": None},
     ]
+    if alpha_sweep:
+        combos.append({"method": "constant_alpha_0.25", "model_seed": None})
+        combos.append({"method": "constant_alpha_0.75", "model_seed": None})
+    combos.append({"method": "sspo", "model_seed": None})
     for method in ("v3_transformer", "wm_hybrid", "residual_rl"):
         for seed in config.seeds.model:
             combos.append({"method": method, "model_seed": int(seed)})
     if include_wm_rl:
         for seed in config.seeds.model:
             combos.append({"method": "wm_residual_rl", "model_seed": int(seed)})
+    if include_direct_rl:
+        for seed in config.seeds.model:
+            combos.append({"method": "direct_rl", "model_seed": int(seed)})
     return combos
 
 
@@ -164,7 +198,8 @@ class MethodFactory:
     def __init__(self, config, *, rl_dir: Path | None, wm_rl_dir: Path | None,
                  wm_checkpoint: Path | None,
                  dataset_dir: Path | None, sspo_schedule: dict | None,
-                 include_wm_rl: bool, wm_sigma: dict | None = None):
+                 include_wm_rl: bool, wm_sigma: dict | None = None,
+                 direct_rl_dir: Path | None = None, rl_round: int = 1):
         self.wm_sigma = wm_sigma
         self.config = config
         self.rl_dir = rl_dir
@@ -173,6 +208,8 @@ class MethodFactory:
         self.dataset_dir = dataset_dir
         self.sspo_schedule = sspo_schedule
         self.include_wm_rl = include_wm_rl
+        self.direct_rl_dir = direct_rl_dir
+        self.rl_round = int(rl_round)
         self._cache: dict[tuple, Any] = {}
         self._wm_computer = None
 
@@ -199,6 +236,10 @@ class MethodFactory:
             policy = FixedControllerPolicy("authority")
         elif method == "constant_alpha":
             policy = ConstantAlphaPolicy(0.5)
+        elif _CONSTANT_ALPHA_RE.fullmatch(method):
+            policy = ConstantAlphaPolicy(
+                float(_CONSTANT_ALPHA_RE.fullmatch(method).group(1))
+            )
         elif method == "sspo":
             if not self.sspo_schedule:
                 raise ValueError("sspo method requires a bias schedule file")
@@ -215,13 +256,23 @@ class MethodFactory:
             policy = WMHybridPolicy(
                 backbone.model, alpha_gain=float(self.config.authority_model.alpha_gain)
             )
+        elif method == "direct_rl":
+            from pac.v4.rl.direct import DirectLivePolicy, load_direct_rl_checkpoint
+
+            if self.direct_rl_dir is None:
+                raise ValueError("direct_rl method requires a checkpoint directory")
+            policy = load_direct_rl_checkpoint(
+                self.direct_rl_dir / f"direct_rl_seed_{int(model_seed)}.pt",
+                expected_model_seed=int(model_seed),
+            )
+            policy = DirectLivePolicy(policy, explore_std=0.0, seed=0)
         elif method in ("residual_rl", "wm_residual_rl"):
             from pac.authority.model import load_alpha_model_checkpoint
             from pac.v4.rl.policy import load_rl_checkpoint
 
             if method == "wm_residual_rl" and not self.include_wm_rl:
                 raise ValueError("wm_residual_rl requested but not included")
-            round_index = 1
+            round_index = self.rl_round
             backbone_path = (
                 Path(self.config.backbone.checkpoint_dir)
                 / f"pac_train_seed_{int(model_seed)}"
@@ -380,7 +431,8 @@ _WORKER_STATE: dict[str, Any] = {}
 
 def _worker_initialize(arguments) -> None:
     (config_path, rl_dir, wm_rl_dir, wm_checkpoint, dataset_dir,
-     sspo_schedule, include_wm_rl, wm_sigma) = arguments
+     sspo_schedule, include_wm_rl, wm_sigma, direct_rl_dir, rl_round,
+     alpha_sweep, include_direct_rl, methods) = arguments
     import torch
 
     torch.set_num_threads(1)
@@ -395,8 +447,16 @@ def _worker_initialize(arguments) -> None:
         sspo_schedule=dict(sspo_schedule),
         include_wm_rl=include_wm_rl,
         wm_sigma=wm_sigma,
+        direct_rl_dir=Path(direct_rl_dir) if direct_rl_dir else None,
+        rl_round=int(rl_round),
     )
-    _WORKER_STATE["combos"] = method_grid(config, include_wm_rl=include_wm_rl)
+    _WORKER_STATE["combos"] = method_grid(
+        config,
+        include_wm_rl=include_wm_rl,
+        alpha_sweep=bool(alpha_sweep),
+        include_direct_rl=bool(include_direct_rl),
+        methods=list(methods) if methods else None,
+    )
 
 
 def _worker_run_task(task: EpisodeTask) -> list[dict[str, Any]]:
@@ -422,6 +482,11 @@ def run_v4_formal(
         jobs: int = 1,
         progress_every: int = 0,
         resume_from: str | Path | None = None,
+        alpha_sweep: bool = False,
+        include_direct_rl: bool = False,
+        direct_rl_dir: str | Path | None = None,
+        rl_round: int = 1,
+        methods: list[str] | tuple[str, ...] | None = None,
         log: Callable[[str], None] = lambda message: None) -> Path | dict[str, Any]:
     """Run the paired formal v4 grid; returns the run directory.
 
@@ -438,7 +503,13 @@ def run_v4_formal(
     sspo_schedule_path = Path(sspo_schedule_path).resolve()
     output_root = Path(output_root).resolve()
     tasks = build_episode_tasks(config, profile)
-    combos = method_grid(config, include_wm_rl=include_wm_rl)
+    combos = method_grid(
+        config,
+        include_wm_rl=include_wm_rl,
+        alpha_sweep=bool(alpha_sweep),
+        include_direct_rl=bool(include_direct_rl),
+        methods=list(methods) if methods else None,
+    )
     plan = {
         "profile": profile,
         "episodes": len(tasks),
@@ -513,6 +584,9 @@ def run_v4_formal(
                 str(config_path), str(rl_dir), str(resolved_wm_rl_dir),
                 str(wm_checkpoint), str(dataset_dir), sspo_schedule,
                 include_wm_rl, wm_sigma,
+                str(Path(direct_rl_dir).resolve()) if direct_rl_dir else None,
+                int(rl_round), bool(alpha_sweep), bool(include_direct_rl),
+                list(methods) if methods else None,
             )
             partial_rows_path = temporary / "partial_rows.jsonl"
             if resumed_rows:
@@ -547,6 +621,9 @@ def run_v4_formal(
                 sspo_schedule=sspo_schedule,
                 include_wm_rl=include_wm_rl,
                 wm_sigma=wm_sigma,
+                direct_rl_dir=(Path(direct_rl_dir).resolve()
+                               if direct_rl_dir else None),
+                rl_round=int(rl_round),
             )
             for task in tasks:
                 spec = build_task_spec(config, task)
@@ -586,8 +663,16 @@ def run_v4_formal(
             if directory.is_dir():
                 for seed in config.seeds.model:
                     checkpoint_hashes[f"{label}/seed_{seed}"] = _sha256(
-                        directory / f"residual_rl_seed_{seed}_round1.pt"
+                        directory / f"residual_rl_seed_{seed}_round{int(rl_round)}.pt"
                     )
+        if include_direct_rl:
+            if direct_rl_dir is None:
+                raise ValueError("include_direct_rl requires direct_rl_dir")
+            resolved_direct_dir = Path(direct_rl_dir).resolve()
+            for seed in config.seeds.model:
+                checkpoint_hashes[f"direct_rl/seed_{seed}"] = _sha256(
+                    resolved_direct_dir / f"direct_rl_seed_{seed}.pt"
+                )
         manifest = {
             "protocol_version": config.protocol.version,
             "profile": profile,
@@ -600,6 +685,13 @@ def run_v4_formal(
             "sspo_schedule_path": str(sspo_schedule_path),
             "sspo_schedule_sha256": _sha256(sspo_schedule_path),
             "rl_checkpoint_sha256": checkpoint_hashes,
+            "rl_round": int(rl_round),
+            "alpha_sweep": bool(alpha_sweep),
+            "include_direct_rl": bool(include_direct_rl),
+            "methods_override": list(methods) if methods else None,
+            "direct_rl_dir": (
+                str(Path(direct_rl_dir).resolve()) if direct_rl_dir else None
+            ),
             "model_seeds": list(config.seeds.model),
             "episode_grid": [
                 {

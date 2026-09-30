@@ -24,6 +24,29 @@ from torch import nn
 RL_PROTOCOL_VERSION = "predictive_authority_v4"
 RL_CHECKPOINT_KIND = "residual_rl_policy"
 WM_FEATURE_DIM = 5
+_ROUND2_UNFREEZE_BLOCKS = ("encoder_last", "head")
+
+
+def unfreeze_round2_blocks(policy: "ResidualAlphaPolicy", blocks) -> None:
+    """Thaw exactly the configured round-2 backbone blocks.
+
+    ``encoder_last`` maps to ``backbone.encoder.layers[-1]`` and ``head``
+    to ``backbone.head``; every other backbone parameter stays frozen at
+    its checkpoint value.  Unknown block names raise so a typo in the
+    config cannot silently unfreeze nothing (or everything).
+    """
+    for name in blocks:
+        if name == "encoder_last":
+            target = policy.backbone.encoder.layers[-1]
+        elif name == "head":
+            target = policy.backbone.head
+        else:
+            raise ValueError(
+                f"unknown rl.unfreeze_blocks_round2 entry: {name!r} "
+                f"(expected any of {_ROUND2_UNFREEZE_BLOCKS})"
+            )
+        for parameter in target.parameters():
+            parameter.requires_grad_(True)
 
 
 class ResidualAlphaPolicy(nn.Module):
@@ -230,4 +253,5 @@ __all__ = [
     "build_wm_features",
     "load_rl_checkpoint",
     "save_rl_checkpoint",
+    "unfreeze_round2_blocks",
 ]
