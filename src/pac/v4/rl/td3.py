@@ -32,15 +32,24 @@ class ReplayBatch:
 
 
 class ReplayBuffer:
-    """Pre-allocated ring buffer over fixed-shape transition tensors."""
+    """Pre-allocated ring buffer over fixed-shape transition tensors.
 
-    def __init__(self, capacity: int, history_len: int, wm_feature_dim: int):
+    ``action_dim`` is 1 for the residual-alpha policy (scalar delta) and
+    6 for the direct-thruster control arm; stored actions are always
+    shaped ``(capacity, action_dim)``.
+    """
+
+    def __init__(self, capacity: int, history_len: int, wm_feature_dim: int,
+                 action_dim: int = 1):
         self.capacity = int(capacity)
         self.history_len = int(history_len)
         self.wm_feature_dim = int(wm_feature_dim)
+        self.action_dim = int(action_dim)
+        if self.action_dim < 1:
+            raise ValueError("action_dim must be >= 1")
         self.windows = np.zeros((self.capacity, self.history_len, 24), dtype=np.float32)
         self.wm_features = np.zeros((self.capacity, self.wm_feature_dim), dtype=np.float32)
-        self.actions = np.zeros(self.capacity, dtype=np.float32)
+        self.actions = np.zeros((self.capacity, self.action_dim), dtype=np.float32)
         self.rewards = np.zeros(self.capacity, dtype=np.float32)
         self.next_windows = np.zeros_like(self.windows)
         self.next_wm_features = np.zeros_like(self.wm_features)
@@ -52,7 +61,7 @@ class ReplayBuffer:
             self,
             window: np.ndarray,
             wm_features: np.ndarray,
-            action: float,
+            action,
             reward: float,
             next_window: np.ndarray,
             next_wm_features: np.ndarray,
@@ -60,7 +69,7 @@ class ReplayBuffer:
         slot = self.index
         self.windows[slot] = window
         self.wm_features[slot] = wm_features
-        self.actions[slot] = float(action)
+        self.actions[slot] = np.asarray(action, dtype=np.float32).reshape(-1)
         self.rewards[slot] = float(reward)
         self.next_windows[slot] = next_window
         self.next_wm_features[slot] = next_wm_features
@@ -81,7 +90,9 @@ class ReplayBuffer:
             count = arrays["windows"].shape[0]
         self.windows[:count] = arrays["windows"]
         self.next_windows[:count] = arrays["next_windows"]
-        self.actions[:count] = arrays["actions"]
+        self.actions[:count] = np.asarray(
+            arrays["actions"], dtype=np.float32
+        ).reshape(count, self.action_dim)
         self.rewards[:count] = arrays["rewards"]
         self.dones[:count] = arrays["dones"]
         if self.wm_feature_dim:
@@ -114,13 +125,18 @@ def _critic_input(
     flat = windows.flatten(1)
     if wm_features.shape[1] > 0:
         flat = torch.cat([flat, wm_features], dim=1)
-    return torch.cat([flat, actions.unsqueeze(1)], dim=1)
+    if actions.ndim == 1:
+        actions = actions.unsqueeze(1)
+    return torch.cat([flat, actions], dim=1)
 
 
 class TwinCritic(nn.Module):
-    def __init__(self, history_len: int, wm_feature_dim: int, hidden_dim: int = 256):
+    def __init__(self, history_len: int, wm_feature_dim: int,
+                 hidden_dim: int = 256, action_dim: int = 1):
         super().__init__()
-        input_dim = history_len * 24 + wm_feature_dim + 1
+        # action_dim widens the input (state + action features); the Q
+        # output stays scalar.
+        input_dim = history_len * 24 + wm_feature_dim + int(action_dim)
         self.q1 = nn.Sequential(
             nn.Linear(input_dim, hidden_dim), nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim), nn.ReLU(),

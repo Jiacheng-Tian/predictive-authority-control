@@ -28,8 +28,14 @@ def compute_step_reward(
         previous_alpha: float,
         saturation_fraction: float,
         deadline_missed: bool,
-        constraint_violated: bool) -> float:
-    """Evaluate the frozen single-step reward for one transition."""
+        constraint_violated: bool,
+        include_delta_alpha: bool = True) -> float:
+    """Evaluate the frozen single-step reward for one transition.
+
+    ``include_delta_alpha=False`` serves the direct-RL control arm, which
+    commands thrusters directly and has no authority coefficient, so its
+    reward drops the ``w_delta_alpha`` term.
+    """
     applied = np.asarray(applied_action, dtype=float).reshape(-1)
     previous = np.asarray(previous_applied, dtype=float).reshape(-1)
     if applied.shape != previous.shape:
@@ -38,17 +44,18 @@ def compute_step_reward(
     e_head = abs(float(heading_error))
     control = float(np.mean(applied ** 2))
     delta_control = float(np.mean((applied - previous) ** 2))
-    delta_alpha = abs(float(alpha) - float(previous_alpha))
     reward = (
         -reward_config.w_position * (e_pos / reward_config.position_scale_m)
         - reward_config.w_heading * (e_head / reward_config.heading_scale_rad)
-        - reward_config.w_control * control
-        - reward_config.w_delta_control * delta_control
-        - reward_config.w_delta_alpha * delta_alpha
-        - reward_config.w_saturation * float(np.clip(saturation_fraction, 0.0, 1.0))
-        - reward_config.w_deadline * float(bool(deadline_missed))
-        - reward_config.w_constraint * float(bool(constraint_violated))
+        -reward_config.w_control * control
+        -reward_config.w_delta_control * delta_control
+        -reward_config.w_saturation * float(np.clip(saturation_fraction, 0.0, 1.0))
+        -reward_config.w_deadline * float(bool(deadline_missed))
+        -reward_config.w_constraint * float(bool(constraint_violated))
     )
+    if include_delta_alpha:
+        delta_alpha = abs(float(alpha) - float(previous_alpha))
+        reward -= reward_config.w_delta_alpha * delta_alpha
     return float(reward)
 
 

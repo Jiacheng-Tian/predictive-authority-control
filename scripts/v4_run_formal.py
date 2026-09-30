@@ -30,6 +30,21 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--run-id", default=None)
     parser.add_argument("--include-wm-rl", action="store_true")
     parser.add_argument("--wm-rl-dir", default=None)
+    parser.add_argument(
+        "--alpha-sweep", action="store_true",
+        help="add constant_alpha_0.25/0.75 probes (preregistered RMSE-alpha sweep)",
+    )
+    parser.add_argument("--include-direct-rl", action="store_true")
+    parser.add_argument("--direct-rl-dir", default=None)
+    parser.add_argument(
+        "--rl-round", type=int, default=1, choices=[1, 2],
+        help="residual-RL checkpoint round to evaluate",
+    )
+    parser.add_argument(
+        "--methods", default=None,
+        help="comma-separated method subset to evaluate (e.g. "
+             "constant_alpha_0.25,constant_alpha_0.75 for the alpha sweep)",
+    )
     parser.add_argument("--jobs", type=int, default=1)
     parser.add_argument(
         "--resume-from", default=None,
@@ -52,6 +67,14 @@ def main(argv: list[str] | None = None) -> int:
         run_id=arguments.run_id,
         include_wm_rl=arguments.include_wm_rl,
         wm_rl_dir=arguments.wm_rl_dir,
+        alpha_sweep=arguments.alpha_sweep,
+        include_direct_rl=arguments.include_direct_rl,
+        direct_rl_dir=arguments.direct_rl_dir,
+        rl_round=arguments.rl_round,
+        methods=(
+            [name.strip() for name in arguments.methods.split(",") if name.strip()]
+            if arguments.methods else None
+        ),
         jobs=arguments.jobs,
         resume_from=arguments.resume_from,
         progress_every=arguments.progress_every,
