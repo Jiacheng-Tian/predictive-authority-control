@@ -1,5 +1,40 @@
 # Follow-up experiment execution log (2026-09-30)
 
+## Completed runs (2026-10-01)
+
+- P0 retraining: `runs/predictive_authority_v4/rl-round1-fixed` and
+  `rl-wm-round1-fixed` (5 seeds x 200k steps, 199601 updates each);
+  acceptance gate passed on all 10 checkpoints (backbones bitwise equal
+  to frozen baselines).
+- P2 round 2: `runs/predictive_authority_v4/rl-round2` (5 seeds from the
+  fixed round-1 checkpoints); gate passed (always-frozen tensors
+  bitwise equal).
+- P3 direct RL: `runs/predictive_authority_v4/direct-rl` (5 seeds,
+  200k steps; reward improved from -103.8 untrained to -39..-54; seed
+  31004 critic diverged and is still evaluated per protocol).
+- P0 formal: `runs/predictive_authority_v4/formal/formal-stage2-fixed-r1`
+  (24 combos x 120 episodes).
+- P1 sweep: `runs/predictive_authority_v4/formal/alpha-sweep-025-075`
+  (2 x 120) + curve `paper/generated_figures_v4/fig_v4_f6_alpha_sweep.*`.
+- P3 formal: `runs/predictive_authority_v4/formal/direct-rl-control`
+  (19 combos x 120: anchors + residual + direct).
+- P2 formal: `runs/predictive_authority_v4/formal/round2-eval`
+  (19 combos x 120, rl_round=2).
+
+### Headline finding (P0)
+
+With the correctly frozen backbone the residual-RL arms no longer show
+a significant RMSE advantage over the supervised backbone in either
+block (unseen mean difference -0.0073 m, t(4) CI [-0.0302, 0.0156]);
+the archived buggy run's unseen advantage (0.116 vs 0.154 m) was an
+artifact of the decaying backbone (effectively squashing predicted
+alpha toward mid-blend during training).  Fixed-alpha 0.5 is the
+strongest unseen method overall, consistent with the P1 sweep
+(unseen RMSE: 0.118 at alpha=0.25, 0.121 at 0.5, 0.179 at 0.75; seen:
+0.071 / 0.066 / 0.067).
+
+---
+
 Machine: 20 logical cores, 32 GB RAM. Each training process pinned to
 1 thread (`OMP_NUM_THREADS=1` + `torch.set_num_threads(1)`), ~1.6 GB RAM
 each. Work dir: `D:\Nautilus\Predictive Authority Control`, branch `main`.
