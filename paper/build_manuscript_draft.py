@@ -852,8 +852,50 @@ def build():
               "trial counts) must be filled with measured values only; they "
               "must not be replaced with simulated or expected data.")
 
-    # ------------------------- 9 conclusion -------------------------
-    heading(doc, 1, "9  Conclusion")
+    # ------------------------- 9 future directions -------------------------
+    heading(doc, 1, "9  Future Directions")
+    para(doc, "The immediate extension is a second residual round under a "
+              "registered rule: unfreeze the final encoder block, target the "
+              "in-distribution regressions (+0.4% position, +4.3% heading), and "
+              "decide in advance that both rounds are reported whichever way the "
+              "comparison ends. The bounded-residual interface makes this an "
+              "incremental step rather than a redesign—the worst case of the "
+              "new round is still the deployed baseline of the current one.")
+    para(doc, "The world-model route has concrete, separable levers. "
+              "Calibration comes first, because a rank-valid but miscalibrated "
+              "signal (14.5% and 32.8% empirical coverage at 68% and 95% nominal) "
+              "cannot be gated safely; conformal or ensemble-recalibration "
+              "methods apply directly. Gate policy and refresh interval come "
+              "second: the current gate opens on only 4–5% of steps, so raising "
+              "engagement where advice can change outcomes is a design variable, "
+              "not a property of the model. Joint training comes third, letting "
+              "world-model predictions participate in the residual objective "
+              "rather than entering only as input features. The promotion rule is "
+              "fixed in advance: a closed-loop gain under the registered "
+              "evaluation promotes the world model into the method; otherwise it "
+              "remains an ablation.")
+    para(doc, "The hardware campaign of Section 8 executes the protocol as "
+              "written, with two additions informed by this study: the injected "
+              "actuator-degradation condition is the primary OOD test, and the "
+              "causal current estimator replaces the privileged simulator input "
+              "so that authority decisions are made on the same information a "
+              "fielded vehicle would have. Before the campaign, an isolation "
+              "experiment should separate the two candidate mechanisms behind "
+              "the deadline-miss increase—trajectory-dependent solver "
+              "conditioning and advisory-computation wall-time—because the "
+              "answer determines what the hardware logging must instrument.")
+    para(doc, "Two further directions are open. On theory, the time-varying "
+              "convex blend lacks a formal stability argument; a common-Lyapunov "
+              "or dwell-time and rate condition for the switched structure would "
+              "complement the architectural safety argument with an analytical "
+              "one. On generality, the authority interface extends beyond two "
+              "experts—per-axis coefficients, larger expert sets, and experts "
+              "added or removed at run time—and the certification structure "
+              "developed here (zero initialization, bounded residual, fixed "
+              "fallbacks) is a candidate template for other learned components "
+              "in safety-relevant loops.")
+
+    heading(doc, 1, "10  Conclusion")
     para(doc, "PAC reframes learned underwater control as a trust question "
               "between structured controllers, and the residual stage "
               "repairs that trust under distribution shift: the OOD tracking "
