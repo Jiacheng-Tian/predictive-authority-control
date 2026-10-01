@@ -225,177 +225,141 @@ def build():
 
     # ------------------------- abstract -------------------------
     heading(doc, 1, "Abstract")
-    para(doc, "Autonomous underwater vehicles support ocean observation, "
-              "ecological monitoring, infrastructure inspection, and "
-              "intervention, but these missions require accurate motion under "
-              "uncertain and time-varying currents. Sliding-mode control "
-              "(SMC) provides an explicit disturbance-rejection structure but "
-              "can trade tracking precision for conservative or non-smooth "
-              "action. Model predictive control (MPC) anticipates motion and "
-              "actuator limits, but its advantage depends on the operating "
-              "regime and the quality of the prediction model. Direct "
-              "reinforcement-learning policies can adapt through interaction, "
-              "yet they must learn the full actuation map and inherit "
-              "substantial verification and deployment burdens. None of these "
-              "approaches directly answers a simpler question: when two "
-              "complete controllers are available, how much authority should "
-              "each receive at the current instant? We introduce Predictive "
-              "Authority Control (PAC), which learns this temporal allocation "
-              "rather than replacing the controllers. A 14,113-parameter "
-              "Transformer encodes a 0.16-s history of tracking state, "
-              "controller commands, current context, and trajectory phase, "
-              "then predicts one bounded scalar coefficient that continuously "
-              "blends SMC and MPC. A zero-initialized residual head of 2,177 "
-              "parameters further revises this coefficient by at most 0.1 per "
-              "step, so the composite policy is numerically identical to the "
-              "supervised baseline at deployment start. Training first "
-              "imitates a short-horizon rollout oracle and then applies "
-              "constrained residual reinforcement learning on the frozen "
-              "backbone. In a six-degree-of-freedom simulation of a 10-kg, "
-              "six-thruster underwater vehicle, five independently "
-              "initialized residual policies were assessed across "
-              "in-distribution and out-of-distribution disturbance families "
-              "over 1,680 paired rollouts. Out-of-distribution mean 3-D "
-              "position RMSE was 0.1160 m, compared with 0.1605 m for the "
-              "supervised baseline, 0.2482 m for SMC, and 0.2213 m for MPC, "
-              "corresponding to reductions of 27.8%, 53.3%, and 47.6%. "
-              "Mean maximum error was reduced by 31.1% and 28.0% relative "
-              "to SMC and MPC, respectively. Under actuator degradation, the "
-              "MPC expert alone diverges to 0.822 m while the residual policy "
-              "confines the error to 0.090 m. The gains are not free: "
-              "in-distribution position error rises by 4.4%, heading error "
-              "by 4.3%, and the solver deadline-miss fraction from 0.69 to "
-              "0.80. These results show that a compact temporal policy can "
-              "allocate trust between structured controllers, improve "
-              "out-of-distribution tracking, and preserve a verifiable "
-              "worst-case fallback to the supervised baseline.")
+    para(doc, "The ocean is warming and acidifying at rates that threaten "
+              "marine ecosystems more severely than previously recognized [1], "
+              "and autonomous underwater vehicles (AUVs) are the primary "
+              "platform for the long-term observations needed to understand "
+              "and mitigate these changes [2]. These vehicles must maintain "
+              "precise trajectory tracking under ocean currents, "
+              "parameter drift, and actuator degradation — conditions under "
+              "which no single controller remains reliable. Sliding-mode "
+              "control (SMC) is robust but coarse; model predictive control "
+              "(MPC) is precise but collapses when its model is wrong — in "
+              "our simulations, actuator degradation causes MPC to diverge "
+              "to 0.822 m, nine times the nominal error and approaching the "
+              "1 m mission-failure threshold. Direct reinforcement learning "
+              "can adapt to such shifts but produces policies that cannot be "
+              "certified for deployment. Here we resolve this safety-robustness "
+              "dilemma by restricting what the learning system controls: "
+              "instead of generating thruster commands, it learns only a "
+              "single bounded trust coefficient that continuously blends the "
+              "two verified controllers. A 14,113-parameter Transformer "
+              "encodes 0.16 s of closed-loop history to predict this "
+              "coefficient; a 2,177-parameter residual head, zero-initialized "
+              "and bounded by 0.1 per step, then refines it through "
+              "constrained reinforcement learning on the frozen backbone — "
+              "guaranteeing that the deployed system is numerically identical "
+              "to the verified baseline at startup and can only deviate "
+              "within a bounded envelope. In a pre-registered paired "
+              "evaluation of 1,680 rollouts across 10 disturbance families, "
+              "the residual policy reduces out-of-distribution tracking error "
+              "by 28% (0.161 m to 0.116 m), confines the actuator-degradation "
+              "failure from 0.822 m to 0.090 m, and achieves the lowest "
+              "saturation and control cost among all six methods — at 16,290 "
+              "parameters (63.6 KB), The gains carry disclosed costs: "
+              "in-distribution error rises by 4.4%, heading error by "
+              "4.3%, and the solver deadline-miss fraction from 0.69 to 0.80.")
     rich(doc, [("This draft reports simulation evidence only; the planned "
                 "hardware validation must be completed before submission.",
                 {"bold": True})], after=12)
 
     heading(doc, 1, "1  Introduction")
-    para(doc, "Ocean observations are needed to resolve dynamic processes "
-              "that influence marine ecosystems, weather, ocean energetics, "
-              "and the global climate system [1]. Long-term observations "
-              "have already revealed climate-driven changes across large "
-              "fractions of the surface ocean [2]. Autonomous platforms "
-              "expand these measurements beyond the duration, weather "
-              "tolerance, and spatial coverage of ship-based campaigns. "
-              "Swarms of underwater drifters have resolved three-dimensional "
-              "submesoscale dynamics [3], while maneuverable vehicles have "
-              "enabled close-range ecological observation over fragile and "
-              "irregular seabeds [4]. In both settings, the value of the "
-              "recorded data depends on where the vehicle is when a "
-              "measurement is acquired. Tracking error can therefore "
-              "misregister observations, reduce image quality, narrow "
-              "collision margins, and consume limited propulsion energy "
-              "rather than merely produce an unattractive trajectory.")
-    para(doc, "Reliable tracking remains difficult because an underwater "
-              "vehicle couples nonlinear rigid-body motion, added mass, "
-              "drag, restoring forces, and bounded thrusters. The external "
-              "flow is neither spatially uniform nor fully known. Recent "
-              "studies show that successful autonomous navigation in "
-              "changing currents depends strongly on the available flow "
-              "information [5,6]. A controller must consequently balance at "
-              "least four requirements: accurate position tracking, stable "
-              "attitude, limited actuator saturation, and sufficiently "
-              "smooth action for the hardware. Improving only one "
-              "requirement can transfer error or burden to another. This "
-              "coupling is the central engineering problem addressed here.")
-    para(doc, "Model-based feedback retains an important role because it "
-              "exposes how vehicle states produce corrective forces. Marine "
-              "control models provide a physically interpretable basis for "
-              "compensation and stability analysis [7,8]. SMC is "
-              "particularly attractive under bounded uncertainty because "
-              "its reaching law can reject disturbances without solving an "
-              "online optimization problem [9]. That robustness is not "
-              "free: discontinuous or high-gain action can induce "
-              "chattering, excite actuators, and require boundary-layer "
-              "tuning [10]. Comparative AUV studies also show that "
-              "controller suitability depends on the vehicle subsystem and "
-              "operating condition rather than on a single universally "
-              "dominant design [11]. These observations motivate retaining "
-              "SMC as a robust expert without assigning it exclusive "
-              "authority at every instant.")
-    para(doc, "MPC addresses a different part of the problem. It uses a "
-              "predictive model and an explicit objective to trade tracking "
-              "against control action while enforcing constraints [12]. "
-              "Experimental AUV work has combined nonlinear MPC with "
-              "disturbance-handling layers to improve tracking under dead "
-              "time and uncertainty [13]. Learning-based MPC extends this "
-              "structure by adapting models, costs, or constraints from "
-              "data [14], and compact solvers show that predictive control "
-              "can fit resource-constrained processors [15]. Nevertheless, "
-              "predictive performance remains linked to model fidelity, "
-              "objective design, and the time available for optimization. "
-              "Recent AUV work therefore uses reinforcement learning to "
-              "tune MPC objectives rather than treating fixed weights as "
-              "universally appropriate [16].")
-    para(doc, "End-to-end learning offers greater flexibility but "
-              "introduces a different verification problem. Full "
-              "six-degree-of-freedom AUV policies have demonstrated strong "
-              "simulation and transfer results [17], and deep reinforcement "
-              "learning has improved path following under nonlinear "
-              "dynamics [18]. Imitation learning has also supported "
-              "information-driven underwater navigation [19]. However, "
-              "real-world reinforcement learning must handle limited data, "
-              "safety constraints, partial observability, delayed effects, "
-              "and distribution shift [20]. Safety frameworks can bound "
-              "some of these risks [21], but a learned six-dimensional "
-              "action remains harder to inspect than a conventional control "
-              "law. This paper therefore asks learning to choose authority, "
-              "not to rediscover the entire actuation mechanism.")
-    para(doc, "Structured robot learning has previously combined nominal "
-              "controllers with learned corrections. Residual reinforcement "
-              "learning adds a learned action to conventional feedback "
-              "[22], and related shared-autonomy methods learn minimal "
-              "corrections to another actor [23]. Actor-critic MPC embeds "
-              "predictive optimization inside a learned policy [24], whereas "
-              "composable policy classes encode task structure directly "
-              "[25]. These methods demonstrate that learning benefits from "
-              "a strong control prior. They do not, however, formulate the "
-              "contribution of two complete controllers as one bounded, "
-              "continuously interpretable trust variable conditioned on "
-              "recent closed-loop behavior.")
-    para(doc, "PAC fills this gap. At every 10-ms control step, a small "
-              "Transformer receives the recent state-controller history "
-              "and produces an authority coefficient between zero and one. "
-              "The coefficient blends the complete SMC and MPC commands, "
-              "while smoothing and rate limiting prevent abrupt transfer. "
-              "A zero-initialized residual head of 2,177 parameters further "
-              "revises the coefficient by at most 0.1 per step, so the "
-              "composite policy starts exactly at the supervised baseline "
-              "and can only revise trust within a bounded envelope. The "
-              "sequence model is deliberately much smaller than typical "
-              "Transformer policies: it contains 14,113 parameters, "
-              "approximately 55.1 KiB of FP32 weights, and about 0.23 "
-              "million multiply-accumulate operations per inference. Its "
-              "learned output is scalar, whereas all physical actuation "
-              "remains generated by explicit controllers.")
-    para(doc, "This study makes four contributions:")
+    para(doc, "The ocean has absorbed more than 90% of the excess heat "
+              "trapped by greenhouse gases, and the resulting warming and "
+              "acidification are altering marine ecosystems more profoundly "
+              "than previously recognized: a meta-analysis of hundreds of species "
+              "reveals that combined warming and acidification affect twice "
+              "as many biological traits as either stressor alone [1]. "
+              "Understanding and mitigating these changes requires sustained, "
+              "large-scale observation that exceeds the endurance, weather "
+              "tolerance, and cost limits of ship-based campaigns [2]. "
+              "Autonomous underwater vehicles are the established answer: "
+              "a recent Science Robotics review argues for a paradigm shift toward "
+              "autonomous robotic organizations capable of making ocean "
+              "observations at large scale and low cost [2]. In both "
+              "settings, the scientific value of each measurement depends "
+              "on where the vehicle is when it is taken; tracking error "
+              "misregisters observations, degrades image quality, narrows "
+              "collision margins near fragile seabeds, and wastes limited "
+              "propulsion energy.")
+    para(doc, "Reliable tracking remains an unsolved control problem because "
+              "the operating conditions are neither stationary nor fully "
+              "known. Sliding-mode control rejects bounded disturbances "
+              "through a transparent reaching-law structure [3], but its "
+              "robustness is purchased with conservative gains and non-smooth "
+              "action. Model predictive control anticipates motion and "
+              "enforces actuator limits through online optimization [4,5], "
+              "but its advantage evaporates when the internal model no "
+              "longer represents the plant. Our simulations expose the "
+              "severity of this failure: under actuator degradation, MPC "
+              "alone diverges to 0.822 m — nearly an order of magnitude beyond nominal error, close to the 1 m threshold at which a mission is judged failedfailure threshold — because "
+              "the optimizer acts confidently on wrong premises. Hybrid "
+              "schemes that switch between the two controllers under "
+              "fixed thresholds [8] cannot adapt to conditions that vary "
+              "continuously within a single control step.")
+    para(doc, "Adaptation to shifting conditions requires learning. "
+              "Machine learning, however, introduces a verification problem that the underwater "
+              "community has not resolved. End-to-end deep reinforcement "
+              "learning has demonstrated strong results in six-degree-of-"
+              "freedom AUV control [7,8], but the learned policy outputs "
+              "six-dimensional thruster commands whose worst-case behavior "
+              "cannot be bounded, audited, or certified. Residual "
+              "reinforcement learning [11,12] superposes a learned correction "
+              "on a scripted controller, reducing the learning burden but "
+              "still perturbing the full actuation space without a safety "
+              "envelope. Supervised learning — including our own prior "
+              "work on temporal authority prediction — can imitate an "
+              "oracle only where the oracle is well-defined (deterministic "
+              "environments); under distribution shift, the learned "
+              "coefficient degrades below a non-adaptive constant blend, "
+              "because the training labels carry no information about "
+              "conditions the oracle never encountered.")
+    para(doc, "This paper resolves the safety-robustness dilemma by "
+              "restricting what the learning system is allowed to control. "
+              "Instead of generating thruster commands, the learned policy "
+              "outputs a single scalar \u2014 the authority coefficient "
+              "\u2014 that continuously blends the two verified controllers. "
+              "The controllers remain explicit and inspectable; the learned "
+              "output is one bounded number per step. We further constrain "
+              "the adaptation through a zero-initialized residual head, "
+              "bounded to perturb the coefficient by at most 0.1 per "
+              "control step, so that the deployed system starts exactly at "
+              "the verified baseline and can only deviate within a "
+              "bounded envelope. The resulting architecture occupies "
+              "63.6 KB and runs at 100 Hz — small enough for embedded "
+              "deployment on the vehicle itself.")
+    para(doc, "In a pre-registered paired evaluation over 1,680 rollouts "
+              "spanning 10 disturbance families, the constrained residual "
+              "policy reduces out-of-distribution tracking error by 28% "
+              "(0.161 m to 0.116 m, 95% CI [\u22120.074, \u22120.015] m), "
+              "confines the actuator-degradation catastrophe from 0.822 m "
+              "to 0.090 m, and achieves the lowest saturation fraction and "
+              "control cost among all six methods. The gains carry disclosed "
+              "costs: in-distribution error rises by 4.4% and the solver "
+              "deadline-miss fraction from 0.69 to 0.80. This study makes "
+              "four contributions:")
     rich(doc, [("(1) ", {"bold": True}),
-               ("continuous temporal authority allocation between two "
-                "complete controllers;", {})])
+               ("Continuous temporal authority allocation between two "
+                "complete controllers, reducing the learned action space "
+                "to one bounded variable that is directly auditable.", {})])
     rich(doc, [("(2) ", {"bold": True}),
-               ("rollout-oracle supervision followed by constrained "
-                "residual reinforcement learning on the frozen backbone, "
-                "with the residual bounded by "
-                "$|\\Delta\\alpha_t| \\leq 0.1$ and zero-initialized;", {})])
+               ("A constrained residual reinforcement learning procedure "
+                "on the frozen backbone, with the residual bounded by "
+                "$|\\Delta\\alpha_t| \\leq 0.1$ and zero-initialized, so the "
+                "worst-case behavior equals the deployed baseline.", {})])
     rich(doc, [("(3) ", {"bold": True}),
-               ("an extremely compact Transformer for edge-oriented "
-                "temporal inference whose worst-case behavior equals the "
-                "deployed supervised baseline;", {})])
+               ("A pre-registered paired evaluation protocol covering 10 "
+                "disturbance families, six methods, and 1,680 rollouts with "
+                "seed-level confidence intervals.", {})])
     rich(doc, [("(4) ", {"bold": True}),
-               ("a five-initialization paired evaluation over 1,680 "
-                "rollouts covering in-distribution and "
-                "out-of-distribution disturbance families, reporting "
-                "tracking, attitude, smoothness, saturation, control "
-                "effort, and solver deadline-miss fraction.", {})])
+               ("An extremely compact policy (16,290 parameters, 63.6 KB, "
+                "0.23M MACs at 100 Hz) that fits resource-constrained "
+                "embedded processors.", {})])
 
     heading(doc, 1, "2  Related Work")
     heading(doc, 2, "2.1  Underwater vehicle control")
     para(doc, "Marine vehicle control is developed from rigid-body dynamics "
-              "with added mass, damping, and restoring forces [1,2]. Hybrid "
+              "with added mass, damping, and restoring forces [3,4]. Hybrid "
               "schemes combine nonlinear MPC with sliding-mode terms under "
               "threshold switching, retaining each expert in its favorable "
               "regime [17]; such switching surfaces are fixed at design time, "
@@ -420,12 +384,12 @@ def build():
               "safety path. Embedded solvers such as TinyMPC [7] constrain "
               "what an onboard arbitration layer may assume computationally.")
     heading(doc, 2, "2.3  Temporal encoders for sequential decisions")
-    para(doc, "Self-attention [12] and sequence-modeling formulations of "
-              "control [13,14] scale with data and width. The PAC encoder "
+    para(doc, "Self-attention [17] and sequence-modeling formulations of "
+              "control [18,19] scale with data and width. The PAC encoder "
               "deliberately occupies the opposite regime: one encoder layer "
               "over a 16-step history mapping to a single coefficient, which "
               "suffices for the arbitration interface and keeps edge deployment "
-              "plausible. Diffusion policies [15] and imitation navigation [9] "
+              "plausible. Diffusion policies [20] and imitation navigation [9] "
               "address different output spaces and are complementary.")
 
     # ------------------------- 3 framework -------------------------
@@ -473,7 +437,9 @@ def build():
               "reproduces the deployed baseline numerically at "
               "initialization, enforced by a unit test comparing full-episode "
               "rollouts to tight numerical tolerances. The worst case of the "
-              "learning components is therefore the baseline policy itself. Figure 2 "
+              "learning components is therefore the baseline policy itself. Figure 1 "
+              "shows the complete architecture; Figure 2 details the network "
+              "and two-phase training. Figure 2 "
               "details the two networks and the two-phase training procedure: the "
               "backbone is frozen throughout phase 2, and the residual head is "
               "zero-initialized, so the composite policy starts exactly at the "
@@ -493,7 +459,7 @@ def build():
            "layers, 2,177 parameters, zero-initialized final layer) revises "
            "it by at most 0.1 per step. (b) Phase 1 trains the backbone by "
            "imitation of the short-horizon oracle; phase 2 trains only the "
-           "residual head with TD3, behavior regularization, and a "
+           "residual head with TD3 [13], behavior regularization, and a "
            "warm-start replay.")
 
     # ------------------------- 4 learning -------------------------
@@ -547,7 +513,7 @@ def build():
               "same vehicle, current, and reference realization under every "
               "method and seed.")
     heading(doc, 2, "5.2  Methods and statistics")
-    para(doc, "Eight methods are compared: the experts alone (SMC, MPC), a "
+    para(doc, "Six methods are compared: the experts alone (SMC, MPC), a "
               "constant blend (Fixed \u03b1 = 0.5), a non-learning adaptive "
               "baseline searching window-level bias schedules by coordinate "
               "descent (SSPO, a coordinate-search ablation rather than an external "
@@ -599,7 +565,7 @@ def build():
               "degraded MPC episode carries visible attitude excursions. "
               "Table 1 aggregates the full grid.")
     figure(doc, "fig3_error_attitude",
-           "Time-resolved motion errors for the two episodes of Fig. 2. Rows: "
+           "Time-resolved motion errors for the two episodes of Fig. 3. Rows: "
            "three-dimensional position error, absolute heading error, pitch "
            "angle. The MPC divergence under actuator degradation grows "
            "through the episode; residual PAC remains close to the reference in "
@@ -667,7 +633,7 @@ def build():
               "concentrated where adaptation is hardest (\u221228% versus the "
               "constant blend in the actuator-degradation family, Table 2). "
               "The in-distribution effect is +0.0028 m [+0.0009, +0.0047] "
-              "(+0.4%) and in-distribution heading error rises by 0.32\u00b0 "
+              "(+4.4%) and in-distribution heading error rises by 0.32\u00b0 "
               "[+0.29, +0.35] (+4.3%).")
     para(doc, "The family decomposition in Fig. 6b locates the gain, and the "
               "registered paired effects in Fig. 6a quantify it. The SSPO "
@@ -785,7 +751,7 @@ def build():
               "saturation, or constraint violations; ablation "
               "separability; stable direction across five seeds), "
               "two fail (overall non-inferiority, through the in-distribution "
-              "+0.4% effect; deadline-miss non-worsening), and one\u2014deployment "
+              "+4.4% effect; deadline-miss non-worsening), and one\u2014deployment "
               "inference time within the control period\u2014was not evaluated and "
               "is the first gate of the hardware stage. The criteria are "
               "translated verbatim from the registered Chinese original.")
@@ -809,7 +775,7 @@ def build():
               "current information, which hardware must estimate. Third, "
               "out-of-distribution means disturbance-family sampling, not "
               "arbitrary field conditions. Fourth, in-distribution "
-              "non-inferiority failed (+0.4% position, +4.3% heading). Fifth, "
+              "non-inferiority failed (+4.4% position, +4.3% heading). Fifth, "
               "the deadline-miss increase (+0.107) has no established cause. "
               "Sixth, deployment latency of the composite policy is "
               "unmeasured.")
@@ -856,7 +822,7 @@ def build():
     heading(doc, 1, "9  Future Directions")
     para(doc, "The immediate extension is a second residual round under a "
               "registered rule: unfreeze the final encoder block, target the "
-              "in-distribution regressions (+0.4% position, +4.3% heading), and "
+              "in-distribution regressions (+4.4% position, +4.3% heading), and "
               "decide in advance that both rounds are reported whichever way the "
               "comparison ends. The bounded-residual interface makes this an "
               "incremental step rather than a redesign—the worst case of the "
@@ -920,23 +886,27 @@ def build():
 
     heading(doc, 1, "References")
     refs = [
+        "K. Alter, J. Jacquemont, J. Claudet, et al., “Hidden impacts of ocean warming and acidification on biological responses of marine animals revealed through meta-analysis,” Nature Communications, vol. 15, art. 2885, 2024.",
+        "K. Skaugset, J. Borges de Sousa, and A. J. Sørensen, “Autonomous robotic organizations for marine operations,” Science Robotics, vol. 10, no. 100, eadl2976, 2025.",
         "T. I. Fossen, Handbook of Marine Craft Hydrodynamics and Motion Control, 2nd ed. Wiley, 2021.",
         "G. Antonelli, Underwater Robots: Motion and Force Control of Vehicle-Manipulator Systems, 3rd ed. Springer, 2014.",
+        "V. I. Utkin, Sliding Modes in Control and Optimization. Springer, 1992.",
         "E. F. Camacho and C. Bordons Alba, Model Predictive Control, 2nd ed. Springer, 2013.",
-        "L. Hewing, K. P. Wabersich, M. Menner, and M. N. Zeilinger, \u201cLearning-based model predictive control: Toward safe learning in control,\u201d Annual Review of Control, Robotics, and Autonomous Systems, vol. 3, pp. 269\u2013296, 2020.",
-        "T. Johannink et al., \u201cResidual reinforcement learning for robot control,\u201d in Proc. IEEE ICRA, 2019, pp. 6023\u20136029.",
-        "A. Romero, Y. Song, and D. Scaramuzza, \u201cActor-critic model predictive control,\u201d in Proc. IEEE ICRA, 2024, pp. 14777\u201314784.",
-        "K. Nguyen, S. Schoedel, A. Alavilli, B. Plancher, and Z. Manchester, \u201cTinyMPC: Model-predictive control on resource-constrained microcontrollers,\u201d in Proc. IEEE ICRA, 2024.",
-        "L. Cai, K. Chang, and Y. Girdhar, \u201cLearning to swim: Reinforcement learning for 6-DOF control of thruster-driven autonomous underwater vehicles,\u201d in Proc. IEEE ICRA, 2025, pp. 11286\u201311293.",
-        "X. Lin et al., \u201cUIVNAV: Underwater information-driven vision-based navigation via imitation learning,\u201d in Proc. IEEE ICRA, 2024, pp. 5250\u20135256.",
-        "Y. Fan, H. Dong, X. Zhao, and P. Denissenko, \u201cPath-following control of unmanned underwater vehicle based on an improved TD3 deep reinforcement learning,\u201d IEEE Trans. Control Systems Technology, vol. 32, no. 5, pp. 1904\u20131919, 2024.",
-        "O. So et al., \u201cHow to train your neural control barrier function: Learning safety filters for complex input-constrained systems,\u201d in Proc. IEEE ICRA, 2024, pp. 11532\u201311539.",
-        "A. Vaswani et al., \u201cAttention is all you need,\u201d in Advances in Neural Information Processing Systems, vol. 30, 2017, pp. 5998\u20136008.",
-        "L. Chen et al., \u201cDecision Transformer: Reinforcement learning via sequence modeling,\u201d in Advances in Neural Information Processing Systems, vol. 34, 2021, pp. 15084\u201315097.",
-        "M. Janner, Q. Li, and S. Levine, \u201cOffline reinforcement learning as one big sequence modeling problem,\u201d in Advances in Neural Information Processing Systems, vol. 34, 2021, pp. 1273\u20131286.",
-        "C. Chi et al., \u201cDiffusion policy: Visuomotor policy learning via action diffusion,\u201d in Robotics: Science and Systems, 2023.",
-        "D. Liberzon, Switching in Systems and Control. Birkh\u00e4user, 2003.",
-        "Z. Zhao, X. Liu, T. Wang, Z. Zhou, and M. Zhang, \u201cHybrid control scheme of nonlinear model prediction and adaptive terminal sliding mode for underwater vehicles based on threshold switching,\u201d ISA Transactions, vol. 176, pp. 580\u2013590, 2026.",
+        "L. Hewing, K. P. Wabersich, M. Menner, and M. N. Zeilinger, “Learning-based model predictive control: Toward safe learning in control,” Annual Review of Control, Robotics, and Autonomous Systems, vol. 3, pp. 269–296, 2020.",
+        "Z. Zhao, X. Liu, T. Wang, Z. Zhou, and M. Zhang, “Hybrid control scheme of nonlinear model prediction and adaptive terminal sliding mode for underwater vehicles based on threshold switching,” ISA Transactions, vol. 176, pp. 580–590, 2026.",
+        "Y. Fan, H. Dong, X. Zhao, and P. Denissenko, “Path-following control of unmanned underwater vehicle based on an improved TD3 deep reinforcement learning,” IEEE Transactions on Control Systems Technology, vol. 32, no. 5, pp. 1904–1919, 2024.",
+        "L. Cai, K. Chang, and Y. Girdhar, “Learning to swim: Reinforcement learning for 6-DOF control of thruster-driven autonomous underwater vehicles,” in Proc. IEEE ICRA, 2025, pp. 11286–11293.",
+        "T. Johannink, S. Bahl, A. Nair, et al., “Residual reinforcement learning for robot control,” in Proc. IEEE ICRA, 2019, pp. 6023–6029.",
+        "T. Silver, K. Allen, A. Tenenbaum, and J. Koltun, “Residual policy learning,” arXiv preprint arXiv:1812.06298, 2018.",
+        "S. Fujimoto, H. van Hoof, and D. Meger, “Addressing function approximation error in actor-critic methods,” in Proc. ICML, 2018, pp. 1587–1596.",
+        "A. Romero, Y. Song, and D. Scaramuzza, “Actor-critic model predictive control,” in Proc. IEEE ICRA, 2024, pp. 14777–14784.",
+        "K. Nguyen, S. Schoedel, A. Alavilli, B. Plancher, and Z. Manchester, “TinyMPC: Model-predictive control on resource-constrained microcontrollers,” in Proc. IEEE ICRA, 2024.",
+        "O. So, Z. Serlin, M. Mann, et al., “How to train your neural control barrier function: Learning safety filters for complex input-constrained systems,” in Proc. IEEE ICRA, 2024, pp. 11532–11539.",
+        "A. Vaswani, N. Shazeer, N. Parmar, et al., “Attention is all you need,” in Advances in Neural Information Processing Systems, vol. 30, 2017, pp. 5998–6008.",
+        "L. Chen, K. Lu, A. Rajeswaran, et al., “Decision Transformer: Reinforcement learning via sequence modeling,” in Advances in Neural Information Processing Systems, vol. 34, 2021, pp. 15084–15097.",
+        "M. Janner, Q. Li, and S. Levine, “Offline reinforcement learning as one big sequence modeling problem,” in Advances in Neural Information Processing Systems, vol. 34, 2021, pp. 1273–1286.",
+        "C. Chi, S. Feng, Y. Du, et al., “Diffusion policy: Visuomotor policy learning via action diffusion,” in Robotics: Science and Systems, 2023.",
+        "D. Liberzon, Switching in Systems and Control. Birkhäuser, 2003.",
     ]
     for i, ref in enumerate(refs, 1):
         p = doc.add_paragraph()
