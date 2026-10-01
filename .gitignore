@@ -18,6 +18,7 @@ paper/*
 !paper/build_thesis_proposal.py
 !paper/build_survey_doc.py
 !paper/开题报告_田家丞.docx
+!paper/开题报告_田家丞_v2.docx
 !paper/轻量化对比调研.docx
 !paper/latex_math.py
 !paper/collect_case_study.py
