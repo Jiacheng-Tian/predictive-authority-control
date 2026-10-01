@@ -15,6 +15,10 @@ paper/*
 !paper/build_hero_figures.py
 !paper/build_template_deck.py
 !paper/build_full_deck.py
+!paper/build_thesis_proposal.py
+!paper/build_survey_doc.py
+!paper/开题报告_田家丞.docx
+!paper/轻量化对比调研.docx
 !paper/latex_math.py
 !paper/collect_case_study.py
 !paper/collect_trajectory_case.py
