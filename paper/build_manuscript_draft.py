@@ -251,12 +251,11 @@ def build():
               "guaranteeing that the deployed system is numerically identical "
               "to the verified baseline at startup and can only deviate "
               "within a bounded envelope. In a pre-registered paired "
-              "evaluation of 1,680 rollouts across 10 disturbance families, "
+              "evaluation of 1,680 rollouts across eight disturbance families, "
               "the residual policy reduces out-of-distribution tracking error "
               "by 28% (0.161 m to 0.116 m), confines the actuator-degradation "
               "failure from 0.822 m to 0.090 m, and achieves the lowest "
-              "saturation and control cost among all six methods — at 16,290 "
-              "parameters (63.6 KB), The gains carry disclosed costs: "
+              "saturation and control cost among all six methods — at six methods. The gains carry disclosed costs: "
               "in-distribution error rises by 4.4%, heading error by "
               "4.3%, and the solver deadline-miss fraction from 0.69 to 0.80.")
     rich(doc, [("This draft reports simulation evidence only; the planned "
@@ -326,10 +325,10 @@ def build():
               "control step, so that the deployed system starts exactly at "
               "the verified baseline and can only deviate within a "
               "bounded envelope. The resulting architecture occupies "
-              "63.6 KB and runs at 100 Hz — small enough for embedded "
+              "63.6 KB and the control loop runs at 100 Hz in simulation — small enough for embedded "
               "deployment on the vehicle itself.")
     para(doc, "In a pre-registered paired evaluation over 1,680 rollouts "
-              "spanning 10 disturbance families, the constrained residual "
+              "spanning eight disturbance families, the constrained residual "
               "policy reduces out-of-distribution tracking error by 28% "
               "(0.161 m to 0.116 m, 95% CI [\u22120.074, \u22120.015] m), "
               "confines the actuator-degradation catastrophe from 0.822 m "
@@ -444,13 +443,13 @@ def build():
               "backbone is frozen throughout phase 2, and the residual head is "
               "zero-initialized, so the composite policy starts exactly at the "
               "supervised baseline.")
-    figure(doc, "fig1_system_architecture_ai",
+    figure(doc, "fig1_system_architecture",
            "Predictive authority control architecture. (a) Closed loop: the "
            "experts generate commands blended by \u03b1; a frozen temporal encoder "
            "predicts the supervised coefficient and a bounded, zero-initialized "
            "residual head revises it. (b) Layered safety filter in execution order. "
            "(c) Two-phase training.")
-    figure(doc, "fig_network_training_ai",
+    figure(doc, "fig_network_training",
            "Network architectures and two-phase training. (a) The frozen "
            "temporal encoder (14,113 parameters) maps a 16\u00d724 history "
            "through a 32-dimensional embedding and one Transformer encoder "
@@ -538,7 +537,7 @@ def build():
     heading(doc, 2, "6.1  Closed-loop tracking: how the vehicle actually moves")
     para(doc, "Figure 3 shows representative paired episodes\u2014an "
               "in-distribution sinusoidal current and the out-of-distribution "
-              "actuator-degradation episode\u2014as three-dimensional paths, "
+              "actuator-degradation episode\u2014as side (x–z) projections, "
               "horizontal projections, and vertical error. In-distribution, "
               "all learning and blending methods follow the Lissajous "
               "reference closely; SMC lags with a visible offset. Under "
@@ -554,7 +553,7 @@ def build():
            "lowest-numbered held-out seed of each block, fixed before "
            "inspection); both episodes are shared across methods and "
            "regenerated deterministically from the frozen checkpoints. "
-           "Rows: three-dimensional path, horizontal projection, z-axis "
+           "Rows: side (x–z) projection, horizontal projection, z-axis "
            "tracking error (dashed line, zero). The fixed blend is omitted "
            "for legibility; its values appear in Table 1.")
     para(doc, "Figure 4 resolves the same episodes in time. The position-error "
