@@ -255,7 +255,7 @@ def build():
               "the residual policy reduces out-of-distribution tracking error "
               "by 28% (0.161 m to 0.116 m), confines the actuator-degradation "
               "failure from 0.822 m to 0.090 m, and achieves the lowest "
-              "saturation and control cost among all six methods — at six methods. The gains carry disclosed costs: "
+              "saturation and control cost among all six methods. The gains carry disclosed costs: "
               "in-distribution error rises by 4.4%, heading error by "
               "4.3%, and the solver deadline-miss fraction from 0.69 to 0.80.")
     rich(doc, [("This draft reports simulation evidence only; the planned "
