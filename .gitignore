@@ -19,6 +19,8 @@ paper/*
 !paper/build_survey_doc.py
 !paper/开题报告_田家丞.docx
 !paper/开题报告_田家丞_v2.docx
+!paper/顶刊顶会20篇阅读记录.docx
+!paper/build_reading_record.py
 !paper/轻量化对比调研.docx
 !paper/latex_math.py
 !paper/collect_case_study.py
