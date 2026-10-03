@@ -1,6 +1,0 @@
-{
-  "physics_baseline": "zero",
-  "reference_summary": "runs\\predictive_authority_v4\\wm-formal-v2-validation-final\\one_step_summary.csv",
-  "training_checkpoint": "runs\\predictive_authority_v4\\wm-pure-control\\pure-control\\world_model.pt",
-  "worst_degradation_factor": 52651.36134726663
-}

@@ -8,7 +8,7 @@ import sys
 
 from pac.authority.evaluation import blend_actions_with_predicted_alpha
 from pac.authority.features import build_alpha_feature, wrap_angle
-from pac.authority.model import train_alpha_model, train_alpha_model_v3
+from pac.authority.model import train_alpha_model, train_alpha_model_supervised
 from pac.authority.oracle import (
     OracleSettings,
     choose_rollout_oracle_alpha,
@@ -17,7 +17,7 @@ from pac.authority.oracle import (
 from pac.authority.dataset import episode_fingerprint
 from pac.evaluation.episode_spec import build_episode_spec
 from pac.evaluation.episodes import build_controller, compute_controller_action
-from pac.controllers.presets import build_v3_controller_pair
+from pac.controllers.presets import build_controller_pair
 from pac.simulation.core import AUVSimulator
 from pac.simulation.observations import CausalCurrentEstimator
 
@@ -261,7 +261,7 @@ def _collection_plan(config, profile: str) -> list[tuple[str, int, int]]:
 
 
 def collect_teacher_dataset_v3(config, profile: str = "formal"):
-    """Collect the true-MPC v3 rollout teacher dataset once per episode."""
+    """Collect the true-MPC rollout teacher dataset once per episode."""
     profile = _normalize_collection_profile(profile)
     if profile in {"short", "formal"}:
         validate_formal_oracle_contract(config.oracle)
@@ -306,7 +306,7 @@ def collect_teacher_dataset_v3(config, profile: str = "formal"):
             environment.reset(episode_spec=spec)
             primary_name = config.controller.primary
             authority_name = config.controller.authority
-            primary, authority = build_v3_controller_pair(
+            primary, authority = build_controller_pair(
                 config,
                 solver_time_limit_s=config.oracle.mpc_solver_time_limit_s,
             )
@@ -468,11 +468,11 @@ def collect_teacher_dataset_v3(config, profile: str = "formal"):
 
 
 __all__ = [
-    "build_v3_controller_pair",
+    "build_controller_pair",
     "choose_oracle_alpha",
     "collect_teacher_dataset",
     "collect_teacher_dataset_v3",
     "normalize_oracle_profile",
     "train_alpha_model",
-    "train_alpha_model_v3",
+    "train_alpha_model_supervised",
 ]

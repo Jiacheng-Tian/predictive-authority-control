@@ -8,17 +8,17 @@ import yaml
 
 
 ROOT = Path(__file__).resolve().parents[1]
-V3_PATH = ROOT / "config" / "pac_v3.yaml"
+V3_PATH = ROOT / "config" / "pac_supervised.yaml"
 
 
-class V3ExperimentConfigTest(unittest.TestCase):
+class SupervisedExperimentConfigTest(unittest.TestCase):
     def test_default_values_are_loaded_into_frozen_dataclasses(self):
-        from pac.experiment_config import V3ExperimentConfig, load_v3_config
+        from pac.experiment_config import SupervisedExperimentConfig, load_supervised_config
 
-        config = load_v3_config(V3_PATH)
+        config = load_supervised_config(V3_PATH)
 
-        self.assertIsInstance(config, V3ExperimentConfig)
-        self.assertEqual(config.protocol.version, "formal_true_mpc_v3")
+        self.assertIsInstance(config, SupervisedExperimentConfig)
+        self.assertEqual(config.protocol.version, "formal_supervised")
         self.assertEqual(config.environment.dt, 0.01)
         self.assertEqual(config.environment.steps, 2100)
         self.assertEqual(config.environment.scenarios, (1, 2, 3))
@@ -58,17 +58,17 @@ class V3ExperimentConfigTest(unittest.TestCase):
         self.assertEqual(config.sspo.search_seeds, tuple(range(51000, 51005)))
         self.assertEqual(config.sspo.eval_seeds, tuple(range(61000, 61010)))
         self.assertEqual(config.robustness.eval_seeds, tuple(range(71000, 71010)))
-        self.assertEqual(config.outputs.run_root, "runs/formal_true_mpc_v3")
-        self.assertEqual(config.outputs.evidence_root, "results/formal_true_mpc_v3")
+        self.assertEqual(config.outputs.run_root, "runs/formal_supervised")
+        self.assertEqual(config.outputs.evidence_root, "results/formal_supervised")
 
         with self.assertRaises((AttributeError, TypeError)):
             config.mpc.horizon = 21
 
     def test_all_seed_partitions_are_pairwise_disjoint(self):
-        from pac.experiment_config import load_v3_config, seed_partitions
+        from pac.experiment_config import load_supervised_config, seed_partitions
         from pac.evaluation.seeds import validate_disjoint_seed_partitions
 
-        config = load_v3_config(V3_PATH)
+        config = load_supervised_config(V3_PATH)
         partitions = seed_partitions(config)
 
         self.assertIsNone(validate_disjoint_seed_partitions(partitions))
@@ -76,7 +76,7 @@ class V3ExperimentConfigTest(unittest.TestCase):
         self.assertEqual(sum(map(len, values)), len({seed for values_ in values for seed in values_}))
 
     def test_search_eval_overlap_is_rejected_with_roles_and_seed(self):
-        from pac.experiment_config import load_v3_config
+        from pac.experiment_config import load_supervised_config
 
         source = yaml.safe_load(V3_PATH.read_text(encoding="utf-8"))
         source["sspo"]["eval_seeds"] = [51000]
@@ -84,10 +84,10 @@ class V3ExperimentConfigTest(unittest.TestCase):
             path = Path(temp_dir) / "invalid.yaml"
             path.write_text(yaml.safe_dump(source), encoding="utf-8")
             with self.assertRaisesRegex(ValueError, r"sspo_search.*sspo_eval.*51000|sspo_eval.*sspo_search.*51000"):
-                load_v3_config(path)
+                load_supervised_config(path)
 
     def test_duplicate_seed_is_rejected_with_role_and_seed(self):
-        from pac.experiment_config import load_v3_config
+        from pac.experiment_config import load_supervised_config
 
         source = yaml.safe_load(V3_PATH.read_text(encoding="utf-8"))
         source["training"]["model_seeds"] = [31000, 31000]
@@ -95,10 +95,10 @@ class V3ExperimentConfigTest(unittest.TestCase):
             path = Path(temp_dir) / "invalid.yaml"
             path.write_text(yaml.safe_dump(source), encoding="utf-8")
             with self.assertRaisesRegex(ValueError, r"model.*31000"):
-                load_v3_config(path)
+                load_supervised_config(path)
 
     def test_mpc_dimensions_are_rejected(self):
-        from pac.experiment_config import load_v3_config
+        from pac.experiment_config import load_supervised_config
 
         source = yaml.safe_load(V3_PATH.read_text(encoding="utf-8"))
         source["mpc"]["q_diag"] = [1.0] * 11
@@ -106,10 +106,10 @@ class V3ExperimentConfigTest(unittest.TestCase):
             path = Path(temp_dir) / "invalid.yaml"
             path.write_text(yaml.safe_dump(source), encoding="utf-8")
             with self.assertRaisesRegex(ValueError, r"q_diag.*12"):
-                load_v3_config(path)
+                load_supervised_config(path)
 
     def test_oracle_solver_time_limit_must_cover_online_budget(self):
-        from pac.experiment_config import load_v3_config
+        from pac.experiment_config import load_supervised_config
 
         source = yaml.safe_load(V3_PATH.read_text(encoding="utf-8"))
         source["oracle"]["mpc_solver_time_limit_s"] = 0.007
@@ -117,10 +117,10 @@ class V3ExperimentConfigTest(unittest.TestCase):
             path = Path(temp_dir) / "invalid.yaml"
             path.write_text(yaml.safe_dump(source), encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "mpc_solver_time_limit_s"):
-                load_v3_config(path)
+                load_supervised_config(path)
 
     def test_every_seed_role_rejects_negative_seeds(self):
-        from pac.experiment_config import load_v3_config
+        from pac.experiment_config import load_supervised_config
 
         seed_fields = {
             ("training", "oracle_train_seeds"): "oracle_train",
@@ -139,10 +139,10 @@ class V3ExperimentConfigTest(unittest.TestCase):
                     path = Path(temp_dir) / "invalid.yaml"
                     path.write_text(yaml.safe_dump(source), encoding="utf-8")
                     with self.assertRaisesRegex(ValueError, rf"{role}.*-1"):
-                        load_v3_config(path)
+                        load_supervised_config(path)
 
     def test_every_seed_role_enforces_uint64_bounds(self):
-        from pac.experiment_config import load_v3_config
+        from pac.experiment_config import load_supervised_config
 
         seed_fields = {
             ("training", "oracle_train_seeds"): "oracle_train",
@@ -164,12 +164,12 @@ class V3ExperimentConfigTest(unittest.TestCase):
                     path = Path(temp_dir) / "invalid.yaml"
                     path.write_text(yaml.safe_dump(too_large), encoding="utf-8")
                     with self.assertRaisesRegex(ValueError, rf"{role}.*18446744073709551616"):
-                        load_v3_config(path)
+                        load_supervised_config(path)
             with self.subTest(role=role, case="max"):
                 with tempfile.TemporaryDirectory() as temp_dir:
                     path = Path(temp_dir) / "valid.yaml"
                     path.write_text(yaml.safe_dump(accepted), encoding="utf-8")
-                    config = load_v3_config(path)
+                    config = load_supervised_config(path)
                     section_config = {
                         "oracle_train_seeds": config.training.oracle_train_seeds,
                         "oracle_val_seeds": config.training.oracle_val_seeds,
@@ -185,7 +185,7 @@ class V3ExperimentConfigTest(unittest.TestCase):
                     self.assertEqual(section_config, (max_seed,))
 
     def test_environment_scale_and_initial_std_bounds(self):
-        from pac.experiment_config import load_v3_config
+        from pac.experiment_config import load_supervised_config
 
         invalid_fields = {
             "mass_scale_xy": 0.0,
@@ -203,7 +203,7 @@ class V3ExperimentConfigTest(unittest.TestCase):
                     path = Path(temp_dir) / "invalid.yaml"
                     path.write_text(yaml.safe_dump(source), encoding="utf-8")
                     with self.assertRaisesRegex(ValueError, "environment"):
-                        load_v3_config(path)
+                        load_supervised_config(path)
 
         source = yaml.safe_load(V3_PATH.read_text(encoding="utf-8"))
         source["environment"].update(
@@ -217,14 +217,14 @@ class V3ExperimentConfigTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "valid.yaml"
             path.write_text(yaml.safe_dump(source), encoding="utf-8")
-            config = load_v3_config(path)
+            config = load_supervised_config(path)
             self.assertEqual(config.environment.current_amplitude_scale, 0.0)
             self.assertEqual(config.environment.eval_initial_position_std, 0.0)
             self.assertEqual(config.environment.eval_initial_velocity_std, 0.0)
             self.assertEqual(config.environment.vertical_current, -10.0)
 
     def test_non_finite_float_values_are_rejected(self):
-        from pac.experiment_config import _float_value, load_v3_config
+        from pac.experiment_config import _float_value, load_supervised_config
 
         for value in (float("nan"), float("inf"), float("-inf")):
             with self.subTest(value=value):
@@ -237,10 +237,10 @@ class V3ExperimentConfigTest(unittest.TestCase):
             path = Path(temp_dir) / "invalid.yaml"
             path.write_text(yaml.safe_dump(source), encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "finite"):
-                load_v3_config(path)
+                load_supervised_config(path)
 
     def test_formal_scenarios_must_be_exactly_one_two_three(self):
-        from pac.experiment_config import load_v3_config
+        from pac.experiment_config import load_supervised_config
 
         for scenarios in ([1, 2], [1, 2, 4]):
             source = yaml.safe_load(V3_PATH.read_text(encoding="utf-8"))
@@ -250,10 +250,10 @@ class V3ExperimentConfigTest(unittest.TestCase):
                     path = Path(temp_dir) / "invalid.yaml"
                     path.write_text(yaml.safe_dump(source), encoding="utf-8")
                     with self.assertRaisesRegex(ValueError, r"scenarios.*1.*2.*3"):
-                        load_v3_config(path)
+                        load_supervised_config(path)
 
     def test_required_strings_reject_null_list_and_blank_values(self):
-        from pac.experiment_config import load_v3_config
+        from pac.experiment_config import load_supervised_config
 
         fields = [
             (("protocol", "version"), None),
@@ -272,10 +272,10 @@ class V3ExperimentConfigTest(unittest.TestCase):
                     path = Path(temp_dir) / "invalid.yaml"
                     path.write_text(yaml.safe_dump(source), encoding="utf-8")
                     with self.assertRaisesRegex(ValueError, "non-empty string"):
-                        load_v3_config(path)
+                        load_supervised_config(path)
 
     def test_output_paths_must_be_relative_and_contained(self):
-        from pac.experiment_config import load_v3_config
+        from pac.experiment_config import load_supervised_config
 
         for field, invalid in (("run_root", "C" + ":/absolute"), ("evidence_root", "results/../escape")):
             source = yaml.safe_load(V3_PATH.read_text(encoding="utf-8"))
@@ -285,7 +285,7 @@ class V3ExperimentConfigTest(unittest.TestCase):
                     path = Path(temp_dir) / "invalid.yaml"
                     path.write_text(yaml.safe_dump(source), encoding="utf-8")
                     with self.assertRaisesRegex(ValueError, r"relative|parent"):
-                        load_v3_config(path)
+                        load_supervised_config(path)
 
 
 if __name__ == "__main__":

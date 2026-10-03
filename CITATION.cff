@@ -1,0 +1,22 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "Predictive Authority Control: Constrained Residual Reinforcement Learning for Robust AUV Trajectory Tracking"
+authors:
+  - family-names: "Tian"
+    given-names: "Jiacheng"
+type: software
+repository-code: "https://github.com/Jiacheng-Tian/predictive-authority-control"
+abstract: >-
+  Predictive Authority Control (PAC) blends a sliding-mode primary
+  controller and a model-predictive authority controller through a bounded,
+  learned authority coefficient. A supervised Transformer stage is followed
+  by a constrained residual reinforcement-learning stage whose correction is
+  bounded and initialized to zero, so the deployed system starts numerically
+  identical to the verified baseline.
+keywords:
+  - autonomous underwater vehicle
+  - reinforcement learning
+  - model predictive control
+  - sliding-mode control
+  - safe learning
+license: MIT

@@ -42,12 +42,12 @@ def _dataset(*, validation_extreme: bool = False):
     return OracleDataset(np.asarray(features), np.asarray(labels), pd.DataFrame(rows))
 
 
-class V3TrainingTest(unittest.TestCase):
+class SupervisedTrainingTest(unittest.TestCase):
     def test_training_restores_all_global_rng_and_determinism_state(self):
-        from pac.authority.model import train_alpha_model_v3
-        from pac.experiment_config import load_v3_config
+        from pac.authority.model import train_alpha_model_supervised
+        from pac.experiment_config import load_supervised_config
 
-        config = load_v3_config(ROOT / "config" / "pac_v3.yaml").authority_model
+        config = load_supervised_config(ROOT / "config" / "pac_supervised.yaml").authority_model
         random.seed(8123)
         np.random.seed(8123)
         torch.manual_seed(8123)
@@ -65,7 +65,7 @@ class V3TrainingTest(unittest.TestCase):
         expected_torch.set_state(before_torch)
         expected_torch_value = float(torch.rand((), generator=expected_torch).item())
 
-        train_alpha_model_v3(_dataset(), config, model_seed=31000, max_epochs=1, patience=1)
+        train_alpha_model_supervised(_dataset(), config, model_seed=31000, max_epochs=1, patience=1)
 
         self.assertEqual(random.random(), expected_python_value)
         self.assertEqual(float(np.random.random_sample()), expected_numpy_value)
@@ -80,7 +80,7 @@ class V3TrainingTest(unittest.TestCase):
         before_numpy = np.random.get_state()
         before_torch = torch.get_rng_state().clone()
         with self.assertRaises(ValueError):
-            train_alpha_model_v3(_dataset(), config, model_seed=31000, max_epochs=0, patience=1)
+            train_alpha_model_supervised(_dataset(), config, model_seed=31000, max_epochs=0, patience=1)
         self.assertEqual(random.getstate(), before_python)
         after_numpy = np.random.get_state()
         self.assertEqual(after_numpy[0], before_numpy[0])
@@ -89,11 +89,11 @@ class V3TrainingTest(unittest.TestCase):
         self.assertTrue(torch.equal(torch.get_rng_state(), before_torch))
 
     def test_train_uses_train_only_normalization_and_episode_windows(self):
-        from pac.authority.model import train_alpha_model_v3
-        from pac.experiment_config import load_v3_config
+        from pac.authority.model import train_alpha_model_supervised
+        from pac.experiment_config import load_supervised_config
 
-        config = load_v3_config(ROOT / "config" / "pac_v3.yaml").authority_model
-        model, history, metrics = train_alpha_model_v3(
+        config = load_supervised_config(ROOT / "config" / "pac_supervised.yaml").authority_model
+        model, history, metrics = train_alpha_model_supervised(
             _dataset(validation_extreme=True), config, model_seed=31000, max_epochs=2, patience=1
         )
 
@@ -106,22 +106,22 @@ class V3TrainingTest(unittest.TestCase):
         self.assertIn("val_mse", metrics)
 
     def test_training_is_deterministic_for_same_seed(self):
-        from pac.authority.model import train_alpha_model_v3
-        from pac.experiment_config import load_v3_config
+        from pac.authority.model import train_alpha_model_supervised
+        from pac.experiment_config import load_supervised_config
 
-        config = load_v3_config(ROOT / "config" / "pac_v3.yaml").authority_model
-        first = train_alpha_model_v3(_dataset(), config, model_seed=31000, max_epochs=2, patience=1)
-        second = train_alpha_model_v3(_dataset(), config, model_seed=31000, max_epochs=2, patience=1)
+        config = load_supervised_config(ROOT / "config" / "pac_supervised.yaml").authority_model
+        first = train_alpha_model_supervised(_dataset(), config, model_seed=31000, max_epochs=2, patience=1)
+        second = train_alpha_model_supervised(_dataset(), config, model_seed=31000, max_epochs=2, patience=1)
         self.assertTrue(first[1].equals(second[1]))
         for name, tensor in first[0].state_dict().items():
             np.testing.assert_allclose(tensor.detach().numpy(), second[0].state_dict()[name].detach().numpy(), rtol=1e-6, atol=1e-7)
 
     def test_early_stopping_metrics_point_to_restored_best_epoch(self):
-        from pac.authority.model import train_alpha_model_v3
-        from pac.experiment_config import load_v3_config
+        from pac.authority.model import train_alpha_model_supervised
+        from pac.experiment_config import load_supervised_config
 
-        config = load_v3_config(ROOT / "config" / "pac_v3.yaml").authority_model
-        _model, history, metrics = train_alpha_model_v3(
+        config = load_supervised_config(ROOT / "config" / "pac_supervised.yaml").authority_model
+        _model, history, metrics = train_alpha_model_supervised(
             _dataset(validation_extreme=True), config, model_seed=31001, max_epochs=8, patience=1
         )
         best_row = history.loc[history["val_mse"].idxmin()]

@@ -1,3 +1,0 @@
-* -text
-results/**/timeseries/*.csv filter=lfs diff=lfs merge=lfs -text
-results/formal_v4/**/detail/*.csv filter=lfs diff=lfs merge=lfs -text

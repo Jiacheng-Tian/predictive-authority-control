@@ -40,7 +40,7 @@ def _write_dataset(path: Path) -> None:
             })
     save_oracle_dataset(
         OracleDataset(np.asarray(features), np.asarray(labels), pd.DataFrame(rows)), path,
-        provenance={"protocol_version": "formal_true_mpc_v3", "profile": "short"},
+        provenance={"protocol_version": "formal_supervised", "profile": "short"},
     )
 
 
@@ -48,7 +48,7 @@ class TrainPacScriptTest(unittest.TestCase):
     def test_formal_and_short_pass_configured_epoch_limits(self):
         import scripts.train_pac as train_pac
         from pac.authority.model import TemporalAlphaTransformer
-        from pac.experiment_config import load_v3_config
+        from pac.experiment_config import load_supervised_config
 
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -56,7 +56,7 @@ class TrainPacScriptTest(unittest.TestCase):
             _write_dataset(dataset)
             config_source = json.loads(json.dumps({}))
             import yaml
-            config_source = yaml.safe_load((ROOT / "config" / "pac_v3.yaml").read_text(encoding="utf-8"))
+            config_source = yaml.safe_load((ROOT / "config" / "pac_supervised.yaml").read_text(encoding="utf-8"))
             config_source["training"]["max_epochs"] = 7
             config_source["training"]["patience"] = 3
             config_path = root / "config.yaml"
@@ -70,7 +70,7 @@ class TrainPacScriptTest(unittest.TestCase):
                 "param_count": 14113,
             }
             clean_git = {"git_commit": "HEAD", "git_dirty": False, "git_diff_sha256": "clean"}
-            with patch.object(train_pac, "train_alpha_model_v3", return_value=(model, history, metrics)) as trainer:
+            with patch.object(train_pac, "train_alpha_model_supervised", return_value=(model, history, metrics)) as trainer:
                 with patch.object(train_pac, "_default_git_provenance", return_value=clean_git):
                     train_pac.main([
                         "--config", str(config_path), "--dataset-dir", str(dataset),
@@ -79,7 +79,7 @@ class TrainPacScriptTest(unittest.TestCase):
                     self.assertEqual(trainer.call_args.kwargs["max_epochs"], 7)
                     self.assertEqual(trainer.call_args.kwargs["patience"], 3)
             trainer.reset_mock()
-            with patch.object(train_pac, "train_alpha_model_v3", return_value=(model, history, metrics)) as trainer:
+            with patch.object(train_pac, "train_alpha_model_supervised", return_value=(model, history, metrics)) as trainer:
                 with patch.object(train_pac, "_default_git_provenance", return_value=clean_git):
                     train_pac.main([
                         "--config", str(config_path), "--dataset-dir", str(dataset),
@@ -101,7 +101,7 @@ class TrainPacScriptTest(unittest.TestCase):
                 else:
                     dataset_arg = dataset
                 completed = subprocess.run(
-                    [sys.executable, "scripts/train_pac.py", "--config", "pac_v3", "--dataset-dir", str(dataset_arg), "--out-dir", str(output), "--profile", "dry"],
+                    [sys.executable, "scripts/train_pac.py", "--config", "pac_supervised", "--dataset-dir", str(dataset_arg), "--out-dir", str(output), "--profile", "dry"],
                     cwd=ROOT, text=True, capture_output=True, check=False,
                 )
                 self.assertNotEqual(completed.returncode, 0)
@@ -123,12 +123,12 @@ class TrainPacScriptTest(unittest.TestCase):
                 "epochs_ran": 1,
                 "param_count": 14113,
             }
-            with patch.object(train_pac, "train_alpha_model_v3", return_value=(model, history, metrics)):
-                with patch.object(train_pac, "save_v3_checkpoint", side_effect=RuntimeError("injected write failure")):
+            with patch.object(train_pac, "train_alpha_model_supervised", return_value=(model, history, metrics)):
+                with patch.object(train_pac, "save_supervised_checkpoint", side_effect=RuntimeError("injected write failure")):
                     with patch.object(train_pac, "_default_git_provenance", return_value={"git_commit": "HEAD", "git_dirty": False, "git_diff_sha256": "clean"}):
                         with self.assertRaisesRegex(RuntimeError, "injected write failure"):
                             train_pac.main([
-                                "--config", "pac_v3", "--dataset-dir", str(dataset),
+                                "--config", "pac_supervised", "--dataset-dir", str(dataset),
                                 "--out-dir", str(output), "--profile", "short",
                             ])
             self.assertFalse(output.exists())
@@ -172,7 +172,7 @@ class TrainPacScriptTest(unittest.TestCase):
             with patch.object(train_pac, "_default_git_provenance", return_value=dirty):
                 with self.assertRaisesRegex(ValueError, "clean git worktree"):
                     train_pac.main([
-                        "--config", "pac_v3", "--dataset-dir", str(dataset),
+                        "--config", "pac_supervised", "--dataset-dir", str(dataset),
                         "--out-dir", str(output), "--profile", "formal",
                     ])
             self.assertFalse(output.exists())
@@ -183,7 +183,7 @@ class TrainPacScriptTest(unittest.TestCase):
             output = root / "dry-output"
             _write_dataset(dataset)
             completed = subprocess.run(
-                [sys.executable, "scripts/train_pac.py", "--config", "pac_v3", "--dataset-dir", str(dataset), "--out-dir", str(output), "--profile", "dry"],
+                [sys.executable, "scripts/train_pac.py", "--config", "pac_supervised", "--dataset-dir", str(dataset), "--out-dir", str(output), "--profile", "dry"],
                 cwd=ROOT, text=True, capture_output=True, check=False,
             )
             self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
@@ -199,7 +199,7 @@ class TrainPacScriptTest(unittest.TestCase):
             output = root / "short-output"
             _write_dataset(dataset)
             completed = subprocess.run(
-                [sys.executable, "scripts/train_pac.py", "--config", "pac_v3", "--dataset-dir", str(dataset), "--out-dir", str(output), "--profile", "short"],
+                [sys.executable, "scripts/train_pac.py", "--config", "pac_supervised", "--dataset-dir", str(dataset), "--out-dir", str(output), "--profile", "short"],
                 cwd=ROOT, text=True, capture_output=True, check=False,
             )
             self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
@@ -218,7 +218,7 @@ class TrainPacScriptTest(unittest.TestCase):
             output = root / "dry-output"
             config_path = root / "invalid-seeds.yaml"
             _write_dataset(dataset)
-            config = yaml.safe_load((ROOT / "config" / "pac_v3.yaml").read_text(encoding="utf-8"))
+            config = yaml.safe_load((ROOT / "config" / "pac_supervised.yaml").read_text(encoding="utf-8"))
             config["training"]["model_seeds"] = [999]
             config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
             completed = subprocess.run(

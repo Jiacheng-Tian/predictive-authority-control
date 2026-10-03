@@ -5,13 +5,13 @@ from pathlib import Path
 import unittest
 
 
-class V3ControllerPairTest(unittest.TestCase):
+class ControllerPairTest(unittest.TestCase):
     def test_pair_reflects_configured_mpc_and_plant_parameters(self):
-        from pac.authority.training import build_v3_controller_pair
-        from pac.experiment_config import load_v3_config
+        from pac.authority.training import build_controller_pair
+        from pac.experiment_config import load_supervised_config
 
         root = Path(__file__).resolve().parents[1]
-        config = load_v3_config(root / "config" / "pac_v3.yaml")
+        config = load_supervised_config(root / "config" / "pac_supervised.yaml")
         mpc = replace(
             config.mpc,
             horizon=7,
@@ -20,7 +20,7 @@ class V3ControllerPairTest(unittest.TestCase):
         actuator = replace(config.actuator, max_force_n=42.0, max_delta_per_step=0.07)
         environment = replace(config.environment, dt=0.02, vehicle_profile="real_10kg_v1")
         pair_config = replace(config, mpc=mpc, actuator=actuator, environment=environment)
-        primary, authority = build_v3_controller_pair(pair_config)
+        primary, authority = build_controller_pair(pair_config)
         self.assertEqual(authority.settings.N, 7)
         self.assertEqual(authority.settings.q_diag, mpc.q_diag)
         self.assertEqual(authority.settings.u_min, actuator.command_min)
@@ -30,12 +30,12 @@ class V3ControllerPairTest(unittest.TestCase):
         self.assertEqual(primary.thruster_layout.max_force, actuator.max_force_n)
 
     def test_online_and_oracle_solver_budgets_are_explicit(self):
-        from pac.authority.training import build_v3_controller_pair
-        from pac.experiment_config import load_v3_config
+        from pac.authority.training import build_controller_pair
+        from pac.experiment_config import load_supervised_config
 
-        config = load_v3_config(Path(__file__).resolve().parents[1] / "config" / "pac_v3.yaml")
-        _, online = build_v3_controller_pair(config)
-        _, oracle = build_v3_controller_pair(
+        config = load_supervised_config(Path(__file__).resolve().parents[1] / "config" / "pac_supervised.yaml")
+        _, online = build_controller_pair(config)
+        _, oracle = build_controller_pair(
             config, solver_time_limit_s=config.oracle.mpc_solver_time_limit_s
         )
         self.assertEqual(online.settings.time_limit_s, 0.0075)

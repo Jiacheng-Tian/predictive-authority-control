@@ -23,15 +23,15 @@ from pac.authority.model import (
     _default_dependency_versions,
     _default_git_provenance,
     _semantic_config_hash,
-    save_v3_checkpoint,
-    train_alpha_model_v3,
+    save_supervised_checkpoint,
+    train_alpha_model_supervised,
 )
-from pac.experiment_config import load_v3_config
+from pac.experiment_config import load_supervised_config
 
 
 def _config_path(value: str) -> Path:
-    if str(value).strip().lower() in {"pac_v3", "pac_v3.yaml"}:
-        return ROOT / "config" / "pac_v3.yaml"
+    if str(value).strip().lower() in {"pac_supervised", "pac_supervised.yaml"}:
+        return ROOT / "config" / "pac_supervised.yaml"
     path = Path(value)
     return path if path.is_absolute() else (Path.cwd() / path)
 
@@ -147,7 +147,7 @@ def _dry_manifest(
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--config", default="pac_v3")
+    parser.add_argument("--config", default="pac_supervised")
     parser.add_argument("--dataset-dir", required=True)
     parser.add_argument("--out-dir", required=True)
     parser.add_argument("--profile", choices=("dry", "short", "formal"), required=True)
@@ -161,7 +161,7 @@ def main(argv: list[str] | None = None) -> int:
     output_dir = Path(args.out_dir).resolve()
     _reject_path_relationships(dataset_dir, output_dir)
     _reject_output(output_dir)
-    config = load_v3_config(config_path)
+    config = load_supervised_config(config_path)
     git_provenance = _default_git_provenance()
     if (
         args.profile == "formal"
@@ -203,7 +203,7 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 max_epochs = int(config.training.max_epochs)
                 run_patience = int(config.training.patience)
-            model, history, metrics = train_alpha_model_v3(
+            model, history, metrics = train_alpha_model_supervised(
                 dataset,
                 config.authority_model,
                 model_seed=seed,
@@ -222,7 +222,7 @@ def main(argv: list[str] | None = None) -> int:
                 json.dumps(summary, indent=2, sort_keys=True, default=_json_default),
                 encoding="utf-8",
             )
-            save_v3_checkpoint(
+            save_supervised_checkpoint(
                 seed_dir / "checkpoint.pt",
                 model,
                 config.authority_model,

@@ -29,14 +29,14 @@ class ControllerPresetContractTest(unittest.TestCase):
             self.assertTrue(np.isfinite(action).all(), builder.__name__)
 
     def test_legacy_alias_and_true_mpc_preset_are_distinct(self):
-        from pac.controllers.legacy_predictive import LegacyOneStepPredictiveController
+        from pac.controllers.predictive_baseline import OneStepPredictiveController
         from pac.controllers.mpc import MPCController
         from pac.controllers.presets import (
-            build_legacy_one_step_predictive_v2,
+            build_one_step_predictive,
             build_real10kg_mpc_ltv_v3,
         )
 
-        self.assertIsInstance(build_legacy_one_step_predictive_v2(), LegacyOneStepPredictiveController)
+        self.assertIsInstance(build_one_step_predictive(), OneStepPredictiveController)
         true_mpc = build_real10kg_mpc_ltv_v3()
         self.assertIsInstance(true_mpc, MPCController)
         self.assertEqual(true_mpc.settings.N, 20)

@@ -8,7 +8,7 @@ from pac.simulation.thrusters import ThrusterLayout
 
 
 class SMCController:
-    """Equivalent-control SMC with the formal-v2 reaching law."""
+    """Equivalent-control SMC with the archived protocol reaching law."""
 
     def __init__(
             self,

@@ -152,18 +152,18 @@ class OracleDatasetTest(unittest.TestCase):
             reordered,
         )
         semantic = {
-            "protocol_version": "formal_true_mpc_v3",
+            "protocol_version": "formal_supervised",
             "config_hash": "config-semantic-sha",
             "actual_seed_partitions": {"train": [1], "val": [2]},
             "oracle_settings": {"horizon": 20, "alpha_grid": [0.0, 1.0]},
             "profile": "short",
-            "config_source": "first-root/config/pac_v3.yaml",
+            "config_source": "first-root/config/pac_supervised.yaml",
             "git_commit": "first",
             "dependency_versions": {"numpy": "one"},
         }
         changed_paths = dict(semantic)
         changed_paths.update({
-            "config_source": "second-root/config/pac_v3.yaml",
+            "config_source": "second-root/config/pac_supervised.yaml",
             "git_commit": "second",
             "dependency_versions": {"numpy": "two"},
         })

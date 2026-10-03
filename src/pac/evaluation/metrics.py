@@ -67,7 +67,7 @@ def compute_error_window_metrics(
         disturbance_time: float = 30.0,
         disturbance_window: float = 10.0) -> dict[str, float]:
     """Compute post-startup, tail, and disturbance-window tracking metrics."""
-    # Preserve the formal-v2 disturbance fields for result-schema compatibility.
+    # Preserve the archived protocol disturbance fields for result-schema compatibility.
     if "error" not in df:
         return {
             "post_startup_rmse": float("nan"),

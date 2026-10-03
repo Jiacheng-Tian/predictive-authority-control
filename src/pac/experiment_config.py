@@ -1,4 +1,4 @@
-"""Typed loading and validation for the formal true-MPC v3 experiment."""
+"""Typed loading and validation for the formal supervised evaluation experiment."""
 
 from __future__ import annotations
 
@@ -128,7 +128,7 @@ class OutputConfig:
 
 
 @dataclass(frozen=True)
-class V3ExperimentConfig:
+class SupervisedExperimentConfig:
     protocol: ProtocolConfig
     environment: EnvironmentConfig
     controller: ControllerConfig
@@ -144,7 +144,7 @@ class V3ExperimentConfig:
 
     @property
     def controllers(self) -> ControllerConfig:
-        """Compatibility alias for callers that use the v2 section name."""
+        """Compatibility alias for callers that use the legacy section name."""
         return self.controller
 
 
@@ -229,19 +229,19 @@ def _float_sequence(value: Any, name: str) -> tuple[float, ...]:
     return tuple(_float_value(item, name) for item in value)
 
 
-def load_v3_config(path: str | Path) -> V3ExperimentConfig:
-    """Load and validate a formal true-MPC v3 YAML configuration."""
+def load_supervised_config(path: str | Path) -> SupervisedExperimentConfig:
+    """Load and validate a formal true-MPC YAML configuration."""
     config_path = Path(path)
     data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
-        raise ValueError("v3 config root must be a mapping")
+        raise ValueError("supervised config root must be a mapping")
 
     protocol_data = _section(data, "protocol")
     protocol = ProtocolConfig(
         version=_non_empty_string(_required(protocol_data, "version"), "protocol.version")
     )
-    if protocol.version != "formal_true_mpc_v3":
-        raise ValueError("protocol.version must be formal_true_mpc_v3")
+    if protocol.version != "formal_supervised":
+        raise ValueError("protocol.version must be formal_supervised")
 
     env = _section(data, "environment")
     environment = EnvironmentConfig(
@@ -484,7 +484,7 @@ def load_v3_config(path: str | Path) -> V3ExperimentConfig:
         ),
     )
 
-    config = V3ExperimentConfig(
+    config = SupervisedExperimentConfig(
         protocol=protocol,
         environment=environment,
         controller=controller,
@@ -502,7 +502,7 @@ def load_v3_config(path: str | Path) -> V3ExperimentConfig:
     return config
 
 
-def seed_partitions(config: V3ExperimentConfig) -> dict[str, tuple[int, ...]]:
+def seed_partitions(config: SupervisedExperimentConfig) -> dict[str, tuple[int, ...]]:
     """Return the independent seed roles used by the v3 experiment."""
     return {
         "oracle_train": config.training.oracle_train_seeds,

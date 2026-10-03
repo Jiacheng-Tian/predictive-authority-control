@@ -15,7 +15,7 @@ from pac.authority.dataset import save_oracle_dataset
 from pac.authority.dataset import canonical_config_hash
 from pac.authority.oracle import validate_formal_oracle_contract
 from pac.authority.training import collect_teacher_dataset_v3, normalize_oracle_profile
-from pac.experiment_config import load_v3_config
+from pac.experiment_config import load_supervised_config
 
 
 def _plan(config, profile: str) -> dict[str, object]:
@@ -74,7 +74,7 @@ def _reject_output_path(path: Path) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", default=str(ROOT / "config" / "pac_v3.yaml"))
+    parser.add_argument("--config", default=str(ROOT / "config" / "pac_supervised.yaml"))
     parser.add_argument("--profile", default="dry")
     parser.add_argument("--out-dir", required=True)
     return parser
@@ -85,7 +85,7 @@ def main(argv: list[str] | None = None) -> int:
     config_path = Path(args.config).resolve()
     output = Path(args.out_dir).resolve()
     _reject_output_path(output)
-    config = load_v3_config(config_path)
+    config = load_supervised_config(config_path)
     profile = str(args.profile).strip().lower()
     if not profile:
         profile = "short"

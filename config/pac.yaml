@@ -59,7 +59,7 @@ sspo:
   jerk_weight: 0.0
 
 outputs:
-  formal_run_dir: runs/formal_seeded_v2
+  formal_run_dir: runs/formal
   sspo_run_dir: runs/sspo_seed20
-  formal_evidence_dir: results/formal_seeded_v2
-  sspo_evidence_dir: results/3d_authority_diagnosis/sspo_alpha_calibration_seed20_v2_regret
+  formal_evidence_dir: results/formal
+  sspo_evidence_dir: runs/sspo_calibration

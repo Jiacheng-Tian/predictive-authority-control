@@ -1,108 +1,100 @@
 # Predictive Authority Control
 
-Predictive Authority Control (PAC) learns a bounded temporal authority
-coefficient that blends explicit sliding-mode and MPC
-controllers for 6-DOF AUV trajectory tracking in simulation.
+Predictive Authority Control (PAC) blends two complementary controllers for
+autonomous underwater vehicle (AUV) trajectory tracking — a sliding-mode
+primary controller (SMC) and a model-predictive authority controller (MPC) —
+through a single bounded, learned authority coefficient. Instead of letting a
+neural network output thrust commands directly, the learned component only
+decides *how much to trust each controller* at every step:
 
-## Evidence
+- **Supervised PAC** — a compact Transformer (14,113 parameters) maps the most
+  recent 16 steps of closed-loop history to the authority coefficient α ∈ [0, 1].
+- **Residual PAC** — a zero-initialized residual head (2,177 parameters),
+  trained with constrained TD3 reinforcement learning, may shift α by at most
+  0.1 per step. At deployment start the system is numerically identical to the
+  verified supervised baseline.
 
-### Legacy v2 evidence
+The complete learning system is 16,290 parameters (≈64 KB), small enough for
+embedded deployment.
 
-The archived `results/formal_seeded_v2/` results are legacy one-step
-predictive v2 evidence. They are not comparable with v3. The legacy formal
-simulation evaluates five independently trained PAC models (training seeds
-20-24) over ten evaluation episodes and three current scenarios. PAC achieves
-aggregate 3-D position RMSE of `0.0902 +/- 0.0098 m`. This improves on the SMC
-and MPC controllers by 37.2% and 38.1%, respectively. After SSPO calibration,
-the seed-20 model reaches `0.07417 m`, a further 17.29% RMSE reduction from
-its supervised PAC result.
+## Headline results
 
-## v3 simulation-only formal evidence
+Paired, simulation-only evaluation over 120 episodes across eight disturbance
+families (see [docs/evaluation_protocol.md](docs/evaluation_protocol.md)):
 
-The v3 formal evidence is standalone, simulation-only evidence and is archived at
-`results/formal_v3/formal-2026-09-10`.
+| Comparison | Supervised PAC | Residual PAC |
+|---|---|---|
+| Out-of-distribution RMSE | 0.161 m | **0.116 m (−28%)** |
+| Actuator-degradation RMSE | 0.295 m | **0.090 m (−69%)** |
+| In-distribution RMSE | **0.064 m** | 0.066 m (+4.4%) |
 
-The metric-specific mixed result versus `real10kg_mpc_ltv_v3` is that
-PAC/predictive_alpha lowers `rmse_3d` by `0.00760 m` with model-seed t(4) CI
-[-0.00794, -0.00726], but has higher `heading_rmse_deg` and
-`solver_deadline_miss_step_fraction`.
+The in-distribution cost is disclosed deliberately: the residual stage trades
+a small in-distribution regression for a large out-of-distribution gain.
+Full tables and per-family breakdowns are shipped in
+[results/paper](results/paper).
 
-All reported results are obtained in a 6-DOF AUV simulation. PAC blends an
-explicit SMC primary controller with an MPC authority controller.
+## Installation
 
-## v4 simulation-only world-model evidence (stage one)
+Requires Python ≥ 3.11 with PyTorch ≥ 2.0.
 
-The v4 stage-one evidence is frozen at
-`results/formal_v4/worldmodel-stage1-2026-09-21`. It covers the physics +
-residual world model: a formal transition dataset (640 episodes,
-1,344,000 transitions over five stochastic disturbance families plus the
-three structured scenarios, with train/val/test seed partitions disjoint
-from v3), a 5-member residual ensemble, the precision-weighted conservative
-fallback, and the five pre-registered stage-1 acceptance gates. Four gates
-pass; the one-step-versus-physics threshold gate fails on magnitude with
-micron-scale absolute errors while the decision-relevant candidate-alpha
-ranking gate passes (test Spearman 0.936, top-1 0.811, matching the
-physics+persistence control at 0.944/0.818). The dataset bodies
-(transitions.npz, metadata.csv) stay outside git, hash-pinned in
-`dataset_manifest.json`; per-row validation CSVs are tracked via Git LFS.
-
-## Quick Start
-
-```powershell
-python -m venv .venv
-.venv/Scripts/python -m pip install -e .
-.venv/Scripts/python scripts/run_formal_seeded_protocol.py --dry-run
-.venv/Scripts/python scripts/sspo_alpha_calibration.py --dry-run
-.venv/Scripts/python scripts/summarize_formal_results.py
-.venv/Scripts/python scripts/verify_repository.py
-.venv/Scripts/python -m unittest discover -s tests -v
+```bash
+python -m pip install -e .
+# tested environment snapshot (torch 2.14.0, numpy 2.4.6, osqp 1.1.3, ...):
+python -m pip install -r requirements-lock.txt
 ```
 
-`requirements-lock.txt` records the package versions used for repository
-verification and repeatable installation.
+## Reproducing the pipeline
 
-## Repository Contents
+Each script documents its options with `--help`. All stages are deterministic
+given the recorded seeds and refuse to overwrite existing outputs.
 
-- `src/pac/` contains the installable simulation, controller, Transformer,
-  training, and evaluation modules.
-- `config/pac.yaml` is the single runtime source for formal and SSPO settings.
-- `scripts/` contains the formal seeded protocol, SSPO calibration, manifest
-  generation, and read-only repository verifier.
-- `results/formal_seeded_v2/` contains five PAC training seeds, five
-  checkpoints, formal raw metrics, fixed-controller metrics, and rollout data.
-- `results/formal_v3/formal-2026-09-10/` contains the v3 simulation-only formal
-  evidence.
-- `results/3d_authority_diagnosis/` contains the seed-20 SSPO results.
+1. **Supervised stage**
+   ```bash
+   python scripts/generate_oracle_dataset.py   # rollout-oracle labels
+   python scripts/train_pac.py                 # trains all model seeds
+   python scripts/run_formal_supervised.py     # paired formal evaluation
+   python scripts/sspo_alpha_calibration.py    # alpha-bias calibration arm
+   ```
+2. **Residual stage** (starts from the frozen supervised checkpoints)
+   ```bash
+   python scripts/train_residual_rl.py         # constrained TD3, one seed per call
+   python scripts/run_formal_paired.py         # 120-episode paired grid
+   python scripts/verify_backbone_frozen.py    # asserts backbone stayed frozen
+   python scripts/summarize_formal_results.py  # tables from a run directory
+   ```
 
-## Git LFS
+Pre-trained checkpoints for both stages are included under
+[results/paper](results/paper): five residual-PAC seeds (each checkpoint is
+self-contained — backbone plus residual head) and the five frozen supervised
+backbones they were initialized from, together with the frozen result tables.
 
-The rollout timeseries CSV files are tracked by Git LFS. Before validating a
-clone, install Git LFS and fetch its data:
+## Repository layout
 
-```powershell
-git lfs install
-git lfs pull
+```
+src/pac/
+  simulation/    AUV dynamics, actuators, thrusters, observation model
+  controllers/   SMC, MPC (QP-based), one-step predictive baseline, presets
+  authority/     supervised PAC: features, oracle, Transformer, training
+  residual/      residual PAC: disturbance families, TD3, reward, paired eval
+  evaluation/    paired protocol, episode specs, metrics, summaries
+scripts/         pipeline entry points (see above)
+config/          frozen experiment configurations
+tests/           unit and parity tests (pytest)
+results/paper/   shipped checkpoints + frozen result tables
+docs/            evaluation protocol
 ```
 
-Routine validation covers the formal protocol, all five checkpoints, the
-headline metrics, and a short end-to-end training and evaluation workflow.
+## Numerical compatibility
 
-New experiments are written under the ignored `runs/` directory. The runners
-refuse to use a non-empty output directory, so the archived evidence under
-`results/` is never overwritten by default.
+Results are deterministic for a fixed environment, but floating-point
+summation order differs across torch versions and hardware. Expect small
+numeric variation when re-running on a different stack; the tests encode
+relaxed tolerances for cross-version comparison.
 
-## v4 stage-two evidence (residual RL + formal grid)
+## Citation
 
-Frozen at `results/formal_v4/stage2-residual-rl-2026-09-23`. Constrained
-TD3 residual RL (frozen v3 backbone, bounded delta-alpha, 5 seeds) versus
-the frozen v3 Transformer, WM-hybrid, WM-feature RL, SSPO, fixed
-controllers, and a constant-alpha control over a 120-episode paired
-seen/unseen grid including eval-only fast-current and estimation-delay
-regimes. Headline (model-seed paired, t(4)): residual RL improves unseen
-RMSE over v3 by -0.0445 m [-0.0737, -0.0154] while being +0.0028 m
-[0.0009, 0.0047] worse on seen; WM-hybrid and WM-feature RL are
-statistically indistinguishable from their non-WM counterparts; RL lowers
-control cost and saturation but raises the MPC deadline-miss fraction.
-The pure-learning capacity control (same architecture without the physics
-baseline) degrades one-step RMSE by ~2000x on unseen disturbances,
-isolating the structural contribution of the physics prior.
+See [CITATION.cff](CITATION.cff).
+
+## License
+
+MIT — see [LICENSE](LICENSE).

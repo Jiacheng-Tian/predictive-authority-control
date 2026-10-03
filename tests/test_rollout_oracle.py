@@ -172,9 +172,9 @@ class RolloutOracleTest(unittest.TestCase):
 
     def test_v3_collection_rejects_missing_or_reused_mpc_plan(self):
         from pac.authority.training import collect_teacher_dataset_v3
-        from pac.experiment_config import load_v3_config
+        from pac.experiment_config import load_supervised_config
 
-        config = load_v3_config(Path(__file__).resolve().parents[1] / "config" / "pac_v3.yaml")
+        config = load_supervised_config(Path(__file__).resolve().parents[1] / "config" / "pac_supervised.yaml")
 
         class FakeController:
             def __init__(self, authority=False, mode="none"):
@@ -200,7 +200,7 @@ class RolloutOracleTest(unittest.TestCase):
                 primary = FakeController(authority=False, mode="none")
                 authority = FakeController(authority=True, mode=mode)
                 with patch(
-                    "pac.authority.training.build_v3_controller_pair",
+                    "pac.authority.training.build_controller_pair",
                     return_value=(primary, authority),
                 ):
                     with self.assertRaisesRegex(RuntimeError, r"episode=.*step=0"):

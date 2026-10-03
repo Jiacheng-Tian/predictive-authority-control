@@ -1,4 +1,4 @@
-"""Pure formal-v2-compatible AUV simulation core."""
+"""Pure archived protocol-compatible AUV simulation core."""
 
 from __future__ import annotations
 
@@ -193,7 +193,7 @@ class AUVSimulator:
         eta, nu = self.dynamics.step(wrench, current)
         self.current_step += 1
 
-        # Preserve formal-v2 metric timing for numerical compatibility.
+        # Preserve archived protocol metric timing for numerical compatibility.
         target = self._get_target(t)
         error = target - eta
         for index in (3, 4, 5):

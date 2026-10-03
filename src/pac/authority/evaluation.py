@@ -1,4 +1,4 @@
-"""Formal-v2-compatible closed-loop PAC evaluation."""
+"""Archived-protocol-compatible closed-loop PAC evaluation."""
 
 from __future__ import annotations
 
@@ -109,7 +109,7 @@ def run_predictive_alpha_episode(
         dt: float = 0.01,
         actuator_max_delta_per_step: float | None = None,
         aligned_metrics: bool = False) -> dict:
-    """Evaluate PAC while preserving the archived formal-v2 metric timing."""
+    """Evaluate PAC while preserving the archived archived protocol metric timing."""
     if policy_architecture != "transformer":
         raise ValueError("formal PAC evaluation requires transformer architecture")
     aligned = bool(aligned_metrics or episode_spec is not None)

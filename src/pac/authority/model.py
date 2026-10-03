@@ -69,7 +69,7 @@ class TemporalAlphaTransformer(nn.Module):
 
 
 def build_temporal_feature_window(history, history_len: int) -> np.ndarray:
-    """Return a fixed-length history window with formal-v2 zero padding."""
+    """Return a fixed-length history window with archived protocol zero padding."""
     if not history:
         raise ValueError("history must contain at least one feature vector")
     arrays = [np.asarray(item, dtype=np.float32).reshape(-1) for item in history]
@@ -373,7 +373,7 @@ def _metadata_episode_ids(metadata: pd.DataFrame, sample_count: int) -> np.ndarr
     return identifiers
 
 
-def _train_alpha_model_v3_impl(
+def _train_alpha_model_supervised_impl(
         dataset: Any,
         config: Any,
         model_seed: int,
@@ -513,7 +513,7 @@ def _train_alpha_model_v3_impl(
     return model, history, metrics
 
 
-def train_alpha_model_v3(
+def train_alpha_model_supervised(
         dataset: Any,
         config: Any,
         model_seed: int,
@@ -534,7 +534,7 @@ def train_alpha_model_v3(
     cudnn_deterministic = getattr(torch.backends.cudnn, "deterministic", None)
     cudnn_benchmark = getattr(torch.backends.cudnn, "benchmark", None)
     try:
-        return _train_alpha_model_v3_impl(
+        return _train_alpha_model_supervised_impl(
             dataset,
             config,
             model_seed=model_seed,
@@ -668,7 +668,7 @@ def _validate_checkpoint_artifact_metadata(
     return commit, dependencies, metrics
 
 
-def save_v3_checkpoint(
+def save_supervised_checkpoint(
         checkpoint_path: str | Path,
         model: TemporalAlphaTransformer,
         config: Any,
@@ -680,7 +680,7 @@ def save_v3_checkpoint(
         training_metrics: Mapping[str, Any] | None = None,
         git_dirty: bool | None = None,
         git_diff_sha256: str | None = None,
-        protocol_version: str = "formal_true_mpc_v3") -> dict[str, Any]:
+        protocol_version: str = "formal_supervised") -> dict[str, Any]:
     """Write a new V3 checkpoint, refusing every pre-existing target."""
     if isinstance(checkpoint_path, TemporalAlphaTransformer) and not isinstance(model, TemporalAlphaTransformer):
         checkpoint_path, model = model, checkpoint_path
@@ -691,7 +691,7 @@ def save_v3_checkpoint(
     target = Path(checkpoint_path).resolve()
     if target.exists():
         raise FileExistsError(f"checkpoint target already exists: {target}")
-    if protocol_version != "formal_true_mpc_v3":
+    if protocol_version != "formal_supervised":
         raise ValueError("unsupported V3 checkpoint protocol_version")
     if not isinstance(dataset_hash, str) or not dataset_hash:
         raise ValueError("dataset_hash must be a non-empty string")
@@ -787,7 +787,7 @@ def save_v3_checkpoint(
     return payload
 
 
-def _load_v3_checkpoint_impl(
+def _load_supervised_checkpoint_impl(
         checkpoint_path: str | Path,
         config: Any | None = None,
         *,
@@ -805,8 +805,9 @@ def _load_v3_checkpoint_impl(
         checkpoint = torch.load(path, map_location="cpu", weights_only=True)
     except (OSError, RuntimeError, EOFError, ValueError) as exc:
         raise ValueError(f"invalid V3 checkpoint: {path}") from exc
-    if not isinstance(checkpoint, dict) or checkpoint.get("protocol_version") != "formal_true_mpc_v3":
-        raise ValueError("checkpoint is not a formal_true_mpc_v3 checkpoint")
+    _ACCEPTED_PROTOCOL_TAGS = ("formal_supervised", "formal_true_mpc_v3")
+    if not isinstance(checkpoint, dict) or checkpoint.get("protocol_version") not in _ACCEPTED_PROTOCOL_TAGS:
+        raise ValueError("checkpoint is not a formal_supervised checkpoint")
     if not isinstance(checkpoint.get("state_dict"), dict):
         raise ValueError("V3 checkpoint state_dict is missing")
     if checkpoint.get("architecture") != "transformer" or checkpoint.get("policy_architecture") != "transformer":
@@ -928,14 +929,14 @@ def _load_v3_checkpoint_impl(
     return model, metadata
 
 
-def load_v3_checkpoint(
+def load_supervised_checkpoint(
         checkpoint_path: str | Path,
         config: Any | None = None,
         **kwargs: Any) -> tuple[TemporalAlphaTransformer, dict[str, Any]]:
     """Load a V3 checkpoint and normalize all contract failures to ValueError."""
     path = Path(checkpoint_path).resolve()
     try:
-        return _load_v3_checkpoint_impl(path, config=config, **kwargs)
+        return _load_supervised_checkpoint_impl(path, config=config, **kwargs)
     except KeyboardInterrupt:
         raise
     except Exception as exc:

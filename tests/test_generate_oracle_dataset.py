@@ -82,7 +82,7 @@ class GenerateOracleDatasetTest(unittest.TestCase):
         import yaml
 
         with tempfile.TemporaryDirectory() as temp_dir:
-            source = yaml.safe_load((ROOT / "config" / "pac_v3.yaml").read_text(encoding="utf-8"))
+            source = yaml.safe_load((ROOT / "config" / "pac_supervised.yaml").read_text(encoding="utf-8"))
             source["oracle"]["horizon"] = 19
             config_path = Path(temp_dir) / "invalid.yaml"
             config_path.write_text(yaml.safe_dump(source), encoding="utf-8")
@@ -108,9 +108,9 @@ class GenerateOracleDatasetTest(unittest.TestCase):
 
     def test_formal_episode_progress_uses_stderr_and_stdout_stays_quiet(self):
         from pac.authority.training import collect_teacher_dataset_v3
-        from pac.experiment_config import load_v3_config
+        from pac.experiment_config import load_supervised_config
 
-        config = load_v3_config(ROOT / "config" / "pac_v3.yaml")
+        config = load_supervised_config(ROOT / "config" / "pac_supervised.yaml")
 
         class FakeController:
             def __init__(self, authority=False):
@@ -133,7 +133,7 @@ class GenerateOracleDatasetTest(unittest.TestCase):
         stderr = StringIO()
         with patch("pac.authority.training._collection_plan", return_value=[("train", 11000, 1)]):
             with patch(
-                "pac.authority.training.build_v3_controller_pair",
+                "pac.authority.training.build_controller_pair",
                 return_value=(FakeController(), FakeController(authority=True)),
             ):
                 with redirect_stdout(stdout), redirect_stderr(stderr):

@@ -1,0 +1,21 @@
+{
+  "best_epoch": 176,
+  "best_val_mse": 0.04089353372608977,
+  "checkpoint": "checkpoint.pt",
+  "config_semantic_sha256": "434dcd262f33a12e209bb3f6884b55c3b179ecd4c3b0dd60022b719a155a66b5",
+  "dataset_hash": "3470f6d606ea8d27e6457aebb07215ddc310ca0897cad291514dc8cae36a5dfd",
+  "epochs_ran": 180,
+  "feature_mode": "state_phase",
+  "history_len": 16,
+  "input_dim": 24,
+  "model_seed": 31002,
+  "param_count": 14113,
+  "policy_architecture": "transformer",
+  "profile": "formal",
+  "temporal_dataset_mode": "precomputed",
+  "train_mse": 0.0359540861929279,
+  "train_samples": 50400,
+  "val_mae": 0.04488911107182503,
+  "val_mse": 0.04089353372608977,
+  "val_samples": 12600
+}

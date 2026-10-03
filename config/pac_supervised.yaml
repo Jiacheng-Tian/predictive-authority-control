@@ -1,0 +1,84 @@
+protocol:
+  version: formal_supervised
+
+environment:
+  dt: 0.01
+  steps: 2100
+  scenarios: [1, 2, 3]
+  mass_scale_xy: 1.0
+  damping_scale_xy: 1.0
+  current_amplitude_scale: 2.5
+  current_frequency_scale: 1.0
+  vertical_current: 0.75
+  eval_initial_position_std: 0.03
+  eval_initial_velocity_std: 0.01
+  vehicle_profile: real_10kg_v1
+  thruster_layout: real_10kg_x
+
+controller:
+  primary: real10kg_smc_steady
+  authority: real10kg_mpc_ltv_v3
+
+authority_model:
+  architecture: transformer
+  feature_mode: state_phase
+  history_len: 16
+  embed_dim: 32
+  heads: 4
+  layers: 1
+  dropout: 0.1
+  alpha_gain: 1.2
+  alpha_smoothing: 0.5
+  alpha_rate_limit: 0.0125
+  alpha_deadband: 0.0
+
+actuator:
+  command_min: -1.0
+  command_max: 1.0
+  max_delta_per_step: 0.10
+  max_force_n: 35.0
+
+mpc:
+  horizon: 20
+  q_diag: [80, 80, 120, 4, 2, 12, 8, 8, 12, 0.5, 0.2, 3]
+  terminal_scale: 5
+  r_diag: [0.05, 0.05, 0.05, 0.05, 0.05, 0.05]
+  s_diag: [0.5, 0.5, 0.5, 0.5, 0.5, 0.5]
+  eps_abs: 0.0001
+  eps_rel: 0.0001
+  max_iter: 1000
+  time_limit_s: 0.0075
+  accept_inaccurate_residual: 0.001
+  max_consecutive_plan_reuse: 3
+
+oracle:
+  horizon: 20
+  mpc_solver_time_limit_s: 0.05
+  alpha_grid: [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+  xy_weight: 1.0
+  z_weight: 0.7
+  heading_weight: 0.08
+  control_delta_weight: 0.01
+  saturation_weight: 0.02
+  terminal_scale: 2.0
+
+training:
+  oracle_train_seeds: [11000, 11001, 11002, 11003, 11004, 11005, 11006, 11007]
+  oracle_val_seeds: [12000, 12001]
+  model_seeds: [31000, 31001, 31002, 31003, 31004]
+  max_epochs: 180
+  patience: 20
+
+evaluation:
+  episode_seeds: [41000, 41001, 41002, 41003, 41004, 41005, 41006, 41007, 41008, 41009, 41010, 41011, 41012, 41013, 41014, 41015, 41016, 41017, 41018, 41019]
+
+sspo:
+  search_seeds: [51000, 51001, 51002, 51003, 51004]
+  eval_seeds: [61000, 61001, 61002, 61003, 61004, 61005, 61006, 61007, 61008, 61009]
+
+robustness:
+  eval_seeds: [71000, 71001, 71002, 71003, 71004, 71005, 71006, 71007, 71008, 71009]
+
+outputs:
+  run_root: runs/formal_supervised
+  evidence_root: results/formal_supervised

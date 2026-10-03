@@ -1,10 +1,10 @@
-"""Controller presets for legacy-v2 and true-MPC-v3 experiments."""
+"""Controller presets for the paired evaluation experiments."""
 
 from __future__ import annotations
 
 import numpy as np
 
-from pac.controllers.legacy_predictive import LegacyOneStepPredictiveController
+from pac.controllers.predictive_baseline import OneStepPredictiveController
 from pac.controllers.mpc import MPCController
 from pac.controllers.mpc_qp import MPCQPSettings
 from pac.controllers.smc import SMCController
@@ -13,10 +13,10 @@ from pac.simulation.thrusters import build_real_10kg_x_layout, build_thruster_la
 from pac.simulation.vehicle_profiles import get_vehicle_profile
 
 
-def build_legacy_one_step_predictive_v2() -> LegacyOneStepPredictiveController:
-    """Build the archived formal-v2 one-step predictive authority expert."""
+def build_one_step_predictive() -> OneStepPredictiveController:
+    """Build the archived archived protocol one-step predictive authority expert."""
     profile = get_vehicle_profile("real_10kg_v1")
-    return LegacyOneStepPredictiveController(
+    return OneStepPredictiveController(
         M=profile.effective_mass,
         D=profile.linear_damping,
         D_quad=profile.quadratic_damping,
@@ -30,9 +30,9 @@ def build_legacy_one_step_predictive_v2() -> LegacyOneStepPredictiveController:
     )
 
 
-def build_real10kg_mpc_event() -> LegacyOneStepPredictiveController:
-    """Compatibility alias for the archived formal-v2 authority expert."""
-    return build_legacy_one_step_predictive_v2()
+def build_real10kg_mpc_event() -> OneStepPredictiveController:
+    """Compatibility alias for the archived archived protocol authority expert."""
+    return build_one_step_predictive()
 
 
 def build_real10kg_mpc_ltv_v3() -> MPCController:
@@ -68,7 +68,7 @@ def build_real10kg_smc_steady(
     )
 
 
-def build_v3_controller_pair(config, *, solver_time_limit_s: float | None = None):
+def build_controller_pair(config, *, solver_time_limit_s: float | None = None):
     """Build the v3 SMC/MPC pair directly from one experiment config."""
     if config.controller.primary != "real10kg_smc_steady":
         raise ValueError(f"unsupported v3 primary controller: {config.controller.primary}")
