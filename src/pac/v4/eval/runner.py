@@ -153,6 +153,39 @@ class TransformerAlphaPolicy:
         return alpha_raw
 
 
+class SquashAlphaPolicy:
+    """Deployment-time affine temperature on another policy's raw alpha.
+
+    ``alpha' = center + temperature * (alpha - center)`` applied before
+    the shared gain/filter stack.  Temperature 1.0 is the identity; the
+    preregistered Stage-3 experiment uses it to move an already-trained
+    residual policy toward the conservative mid-blend operating point
+    without retraining.
+    """
+
+    def __init__(self, policy, temperature: float, center: float = 0.5):
+        if not 0.0 < float(temperature) <= 1.0:
+            raise ValueError("squash temperature must be in (0, 1]")
+        if not 0.0 <= float(center) <= 1.0:
+            raise ValueError("squash center must be in [0, 1]")
+        self.policy = policy
+        self.temperature = float(temperature)
+        self.center = float(center)
+
+    @property
+    def uses_wm(self) -> bool:
+        return bool(getattr(self.policy, "uses_wm", False))
+
+    direct_action = False
+
+    def reset(self, spec: V4EpisodeSpec, episode_end: float) -> None:
+        self.policy.reset(spec, episode_end)
+
+    def select_alpha(self, context: StepContext) -> float:
+        alpha_raw = float(self.policy.select_alpha(context))
+        return self.center + self.temperature * (alpha_raw - self.center)
+
+
 def build_backbone_policy(config, model_seed: int, *,
                           alpha_bias_schedule=None) -> TransformerAlphaPolicy:
     """Load one frozen v3 backbone checkpoint as a v4 policy."""
@@ -591,6 +624,7 @@ def run_v4_policy_episode(
 __all__ = [
     "ConstantAlphaPolicy",
     "FixedControllerPolicy",
+    "SquashAlphaPolicy",
     "StepContext",
     "TransformerAlphaPolicy",
     "V4Policy",

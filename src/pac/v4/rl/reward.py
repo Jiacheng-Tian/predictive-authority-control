@@ -56,6 +56,11 @@ def compute_step_reward(
     if include_delta_alpha:
         delta_alpha = abs(float(alpha) - float(previous_alpha))
         reward -= reward_config.w_delta_alpha * delta_alpha
+    w_center = float(getattr(reward_config, "w_center", 0.0))
+    center_gate = float(getattr(reward_config, "center_gate_error_m", 0.0))
+    if w_center > 0.0 and e_pos > center_gate:
+        alpha_center = float(getattr(reward_config, "alpha_center", 0.5))
+        reward -= w_center * (float(alpha) - alpha_center) ** 2
     return float(reward)
 
 

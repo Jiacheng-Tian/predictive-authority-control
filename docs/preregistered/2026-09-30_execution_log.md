@@ -1,5 +1,66 @@
 # Follow-up experiment execution log (2026-09-30)
 
+## PAUSED STATE (2026-10-07, user-requested pause)
+
+Everything is stopped.  Stage-3 status: T=0.40 selection COMPLETE
+(`formal/select-s3-t040`: seen 0.0950 FAIL gate 0.068, unseen 0.1604;
+actuator-delay-unseen fixed to 0.1294 at alpha 0.395 -- mechanism
+works; benign families degraded by the uniform level pull; new finding:
+alpha TEMPORAL SMOOTHNESS, not level, separates the buggy run's benign
+performance from ours).  T=0.25 selection PAUSED at 792/1320 rows.
+
+Resume command when the user asks (Windows Git Bash):
+
+```
+cd "D:\Nautilus\Predictive Authority Control"
+export PYTHONPATH="D:\Nautilus\Predictive Authority Control\src"
+OMP_NUM_THREADS=1 python scripts/v4_run_formal.py \
+  --config config/pac_v4_s2a.yaml --profile formal \
+  --methods constant_alpha,v3_transformer,residual_rl \
+  --rl-dir runs/predictive_authority_v4/s2a --alpha-squash 0.25 \
+  --dataset-dir runs/predictive_authority_v4/wm-dataset-formal-v2 \
+  --wm-checkpoint runs/predictive_authority_v4/wm-formal-v2/world_model.pt \
+  --sspo-schedule runs/predictive_authority_v4/sspo-v4/best_bias_schedule.json \
+  --run-id select-s3-t025 --jobs 12 --progress-every 40 \
+  --resume-from "runs/predictive_authority_v4/formal/.select-s3-t025.tmp-hg2tgh7a/partial_rows.jsonl"
+```
+
+NOTE: a foreign editable install of `pac` (D:\Nautilus\pac-clone-a3,
+created 2026-10-03) shadows this repo globally -- ALWAYS export
+PYTHONPATH as above or imports resolve to the wrong codebase.
+
+After t025 completes: preregistered verdict per
+`2026-10-01_e1_centering.md` Stage 3; expected FAIL of the seen gate ->
+honest-conclusion close-out, unless the user authorizes a Stage 4
+(tighter deployment alpha rate-limit to test the smoothness
+hypothesis; zero training).
+
+## E1 conservative-centering residual RL (2026-10-01 afternoon)
+
+Prereg: `2026-10-01_e1_centering.md`.  Diagnosis (committed data):
+unseen gap = actuator_delay_noise family only (0.3054 vs 0.0900);
+floor alpha~0.25 -> 0.0746; fixed residual alpha 0.643 there with
+delta_max=0.1 authority.  Grid: E1a {dm 0.35, w_center 0},
+E1b {dm 0.35, w_center 0.5}, E1c {dm 0.25, w_center 0.5}.
+
+- Code: RewardConfig.w_center/alpha_center optional (default 0/0.5,
+  frozen protocol unaffected, bitwise-verified); reward centering term
+  on the applied alpha; configs config/pac_v4_e1{a,b,c}.yaml.
+- E1b smoke passed (checkpoint records delta_max 0.35,
+  reward pac_v4_reward_v2_center).
+- Wave 1 (E1a x5 + E1b x5) -> runs/predictive_authority_v4/e1{a,b};
+  wave 2 (E1c x5) after.  Selection per arm: formal run with methods
+  constant_alpha,v3_transformer,residual_rl (11x120), choose on seen
+  only (gate seen<=0.068).  Final: winner 24-combo formal.
+- Wave-1 launch command pattern:
+  `OMP_NUM_THREADS=1 python scripts/v4_train_rl.py --config
+  config/pac_v4_e1X.yaml --dataset-dir
+  runs/predictive_authority_v4/wm-dataset-formal-v2 --out-dir
+  runs/predictive_authority_v4/e1X --model-seed $s`
+- Acceptance before eval: v4_verify_backbone_frozen on every checkpoint.
+- Success: unseen<=0.125, seen<=0.066, paired CI vs v3 excludes 0.
+  Commit to git only after acceptance.
+
 ## Completed runs (2026-10-01)
 
 - P0 retraining: `runs/predictive_authority_v4/rl-round1-fixed` and

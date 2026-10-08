@@ -165,6 +165,14 @@ class RewardConfig:
     w_constraint: float
     position_scale_m: float
     heading_scale_rad: float
+    # Optional conservative-centering prior for the RL-residual path
+    # (E1/S2 experiments): penalizes the deployed alpha away from
+    # alpha_center while the position error exceeds
+    # center_gate_error_m (0.0 = always active).  Zero w_center (the
+    # frozen protocol value) disables the term.
+    w_center: float = 0.0
+    alpha_center: float = 0.5
+    center_gate_error_m: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -453,11 +461,27 @@ def _load_reward(data: dict[str, Any]) -> RewardConfig:
     )
     if position_scale <= 0.0 or heading_scale <= 0.0:
         raise ValueError("reward normalization scales must be positive")
+    w_center = _float_value(section.get("w_center", 0.0), "reward.w_center")
+    alpha_center = _float_value(
+        section.get("alpha_center", 0.5), "reward.alpha_center"
+    )
+    center_gate = _float_value(
+        section.get("center_gate_error_m", 0.0), "reward.center_gate_error_m"
+    )
+    if w_center < 0.0:
+        raise ValueError("reward.w_center must be non-negative")
+    if not 0.0 <= alpha_center <= 1.0:
+        raise ValueError("reward.alpha_center must be in [0, 1]")
+    if center_gate < 0.0:
+        raise ValueError("reward.center_gate_error_m must be non-negative")
     return RewardConfig(
         version=_non_empty_string(_required(section, "version"), "reward.version"),
         **weights,
         position_scale_m=position_scale,
         heading_scale_rad=heading_scale,
+        w_center=w_center,
+        alpha_center=alpha_center,
+        center_gate_error_m=center_gate,
     )
 
 

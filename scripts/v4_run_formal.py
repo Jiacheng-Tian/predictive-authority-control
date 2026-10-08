@@ -45,6 +45,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="comma-separated method subset to evaluate (e.g. "
              "constant_alpha_0.25,constant_alpha_0.75 for the alpha sweep)",
     )
+    parser.add_argument(
+        "--alpha-squash", type=float, default=None,
+        help="deployment-time alpha temperature applied to the residual "
+             "policy (Stage 3), e.g. 0.4",
+    )
+    parser.add_argument(
+        "--block-filter", default=None, choices=["seen", "unseen"],
+        help="evaluate only one block of the paired grid (compute saver)",
+    )
     parser.add_argument("--jobs", type=int, default=1)
     parser.add_argument(
         "--resume-from", default=None,
@@ -75,6 +84,8 @@ def main(argv: list[str] | None = None) -> int:
             [name.strip() for name in arguments.methods.split(",") if name.strip()]
             if arguments.methods else None
         ),
+        alpha_squash=arguments.alpha_squash,
+        block_filter=arguments.block_filter,
         jobs=arguments.jobs,
         resume_from=arguments.resume_from,
         progress_every=arguments.progress_every,

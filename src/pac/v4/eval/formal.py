@@ -199,7 +199,8 @@ class MethodFactory:
                  wm_checkpoint: Path | None,
                  dataset_dir: Path | None, sspo_schedule: dict | None,
                  include_wm_rl: bool, wm_sigma: dict | None = None,
-                 direct_rl_dir: Path | None = None, rl_round: int = 1):
+                 direct_rl_dir: Path | None = None, rl_round: int = 1,
+                 alpha_squash: float | None = None):
         self.wm_sigma = wm_sigma
         self.config = config
         self.rl_dir = rl_dir
@@ -210,6 +211,9 @@ class MethodFactory:
         self.include_wm_rl = include_wm_rl
         self.direct_rl_dir = direct_rl_dir
         self.rl_round = int(rl_round)
+        self.alpha_squash = (
+            None if alpha_squash is None else float(alpha_squash)
+        )
         self._cache: dict[tuple, Any] = {}
         self._wm_computer = None
 
@@ -292,6 +296,12 @@ class MethodFactory:
             from pac.v4.rl.collect import LiveResidualPolicy
 
             policy = LiveResidualPolicy(policy, explore_std=0.0, seed=0)
+            if self.alpha_squash is not None:
+                from pac.v4.eval.runner import SquashAlphaPolicy
+
+                policy = SquashAlphaPolicy(
+                    policy, temperature=self.alpha_squash
+                )
         else:
             raise ValueError(f"unknown formal method: {method}")
         self._cache[key] = policy
@@ -432,7 +442,7 @@ _WORKER_STATE: dict[str, Any] = {}
 def _worker_initialize(arguments) -> None:
     (config_path, rl_dir, wm_rl_dir, wm_checkpoint, dataset_dir,
      sspo_schedule, include_wm_rl, wm_sigma, direct_rl_dir, rl_round,
-     alpha_sweep, include_direct_rl, methods) = arguments
+     alpha_sweep, include_direct_rl, methods, alpha_squash) = arguments
     import torch
 
     torch.set_num_threads(1)
@@ -449,6 +459,7 @@ def _worker_initialize(arguments) -> None:
         wm_sigma=wm_sigma,
         direct_rl_dir=Path(direct_rl_dir) if direct_rl_dir else None,
         rl_round=int(rl_round),
+        alpha_squash=alpha_squash,
     )
     _WORKER_STATE["combos"] = method_grid(
         config,
@@ -487,6 +498,8 @@ def run_v4_formal(
         direct_rl_dir: str | Path | None = None,
         rl_round: int = 1,
         methods: list[str] | tuple[str, ...] | None = None,
+        alpha_squash: float | None = None,
+        block_filter: str | None = None,
         log: Callable[[str], None] = lambda message: None) -> Path | dict[str, Any]:
     """Run the paired formal v4 grid; returns the run directory.
 
@@ -503,6 +516,10 @@ def run_v4_formal(
     sspo_schedule_path = Path(sspo_schedule_path).resolve()
     output_root = Path(output_root).resolve()
     tasks = build_episode_tasks(config, profile)
+    if block_filter is not None:
+        if block_filter not in ("seen", "unseen"):
+            raise ValueError("block_filter must be 'seen' or 'unseen'")
+        tasks = [task for task in tasks if task.block == block_filter]
     combos = method_grid(
         config,
         include_wm_rl=include_wm_rl,
@@ -587,6 +604,7 @@ def run_v4_formal(
                 str(Path(direct_rl_dir).resolve()) if direct_rl_dir else None,
                 int(rl_round), bool(alpha_sweep), bool(include_direct_rl),
                 list(methods) if methods else None,
+                float(alpha_squash) if alpha_squash is not None else None,
             )
             partial_rows_path = temporary / "partial_rows.jsonl"
             if resumed_rows:
@@ -624,6 +642,8 @@ def run_v4_formal(
                 direct_rl_dir=(Path(direct_rl_dir).resolve()
                                if direct_rl_dir else None),
                 rl_round=int(rl_round),
+                alpha_squash=(float(alpha_squash)
+                              if alpha_squash is not None else None),
             )
             for task in tasks:
                 spec = build_task_spec(config, task)
@@ -689,6 +709,10 @@ def run_v4_formal(
             "alpha_sweep": bool(alpha_sweep),
             "include_direct_rl": bool(include_direct_rl),
             "methods_override": list(methods) if methods else None,
+            "alpha_squash": (
+                float(alpha_squash) if alpha_squash is not None else None
+            ),
+            "block_filter": block_filter,
             "direct_rl_dir": (
                 str(Path(direct_rl_dir).resolve()) if direct_rl_dir else None
             ),

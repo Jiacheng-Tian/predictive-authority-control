@@ -123,5 +123,68 @@ class ConstantAlphaPolicyResolutionTests(unittest.TestCase):
             self.assertEqual(tuple(action.shape), (2, 6))
 
 
+    def test_alpha_squash_wraps_residual_policy(self):
+        """Stage 3: the factory applies the deployment temperature."""
+        import tempfile
+
+        import torch
+
+        from pac.authority.model import load_alpha_model_checkpoint
+        from pac.v4.eval.formal import MethodFactory
+        from pac.v4.eval.runner import SquashAlphaPolicy
+        from pac.v4.rl.policy import (
+            ResidualAlphaPolicy,
+            save_rl_checkpoint,
+        )
+
+        config = load_v4_config(_CONFIG_PATH)
+        seed = int(config.seeds.model[0])
+        backbone, _meta = load_alpha_model_checkpoint(
+            Path(config.backbone.checkpoint_dir)
+            / f"pac_train_seed_{seed}" / "checkpoint.pt"
+        )
+        policy = ResidualAlphaPolicy(
+            backbone, delta_max=0.25, lambda_blend=1.0
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            save_rl_checkpoint(
+                Path(temp_dir) / f"residual_rl_seed_{seed}_round1.pt",
+                policy,
+                model_seed=seed,
+                round_index=1,
+                backbone_checkpoint="x",
+                reward_version="r",
+                wm_version="none",
+                training_summary={},
+            )
+            factory = MethodFactory(
+                config, rl_dir=Path(temp_dir), wm_rl_dir=Path(temp_dir),
+                wm_checkpoint=Path("."), dataset_dir=Path("."),
+                sspo_schedule=None, include_wm_rl=False,
+                alpha_squash=0.4,
+            )
+            live = factory.policy_for("residual_rl", seed)
+            self.assertIsInstance(live, SquashAlphaPolicy)
+            self.assertEqual(live.temperature, 0.4)
+
+    def test_squash_alpha_math(self):
+        from pac.v4.eval.runner import ConstantAlphaPolicy, SquashAlphaPolicy
+
+        inner = ConstantAlphaPolicy(0.8)
+        squash = SquashAlphaPolicy(inner, temperature=0.4, center=0.5)
+
+        class _Ctx:
+            pass
+
+        raw = squash.select_alpha(_Ctx())
+        self.assertAlmostEqual(raw, 0.5 + 0.4 * (0.8 - 0.5), places=12)
+        identity = SquashAlphaPolicy(ConstantAlphaPolicy(0.3), 1.0)
+        self.assertAlmostEqual(identity.select_alpha(_Ctx()), 0.3, places=12)
+        with self.assertRaises(ValueError):
+            SquashAlphaPolicy(inner, 1.5)
+        with self.assertRaises(ValueError):
+            SquashAlphaPolicy(inner, 0.0)
+
+
 if __name__ == "__main__":
     unittest.main()
