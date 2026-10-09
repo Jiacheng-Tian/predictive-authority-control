@@ -196,6 +196,11 @@ class RLConfig:
     updates_per_step: int
     max_steps_per_round: int
     warmstart_transitions: int
+    # S5 optimization levers (defaults preserve the frozen protocol):
+    # n-step return aggregation in the replay buffer, and LayerNorm over
+    # the flattened critic input.
+    n_step: int = 1
+    critic_input_norm: bool = False
 
 
 @dataclass(frozen=True)
@@ -520,7 +525,11 @@ def _load_rl(data: dict[str, Any]) -> RLConfig:
         warmstart_transitions=_int_value(
             _required(section, "warmstart_transitions"), "rl.warmstart_transitions"
         ),
+        n_step=_int_value(section.get("n_step", 1), "rl.n_step"),
+        critic_input_norm=bool(section.get("critic_input_norm", False)),
     )
+    if config.n_step < 1:
+        raise ValueError("rl.n_step must be >= 1")
     if not 0.0 < config.delta_max <= 1.0:
         raise ValueError("rl.delta_max must be in (0, 1]")
     if config.lambda_blend < 0.0 or config.behavior_reg < 0.0:

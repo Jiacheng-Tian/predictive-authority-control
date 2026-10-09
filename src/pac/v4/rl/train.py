@@ -119,6 +119,7 @@ def train_residual_rl(
         wm_feature_dim=wm_dim,
         device=resolved_device,
         seed=int(model_seed),
+        critic_input_norm=bool(getattr(rl, "critic_input_norm", False)),
     )
 
     dataset_hash = dataset_content_hash(dataset_dir)
@@ -132,6 +133,8 @@ def train_residual_rl(
         capacity,
         int(config.authority_model.history_len),
         wm_dim,
+        n_step=int(getattr(rl, "n_step", 1)),
+        gamma=float(rl.gamma),
     )
     replay.extend(warmstart)
     log(

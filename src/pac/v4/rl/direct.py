@@ -131,6 +131,7 @@ class DirectTD3Trainer:
         next_windows = batch.next_windows.to(self.device)
         next_wm_features = batch.next_wm_features.to(self.device)
         dones = batch.dones.to(self.device)
+        horizons = batch.horizons.to(self.device)
         with torch.no_grad():
             next_action = self.policy_target(next_windows)
             noise = torch.randn_like(next_action) * self.target_noise
@@ -140,7 +141,9 @@ class DirectTD3Trainer:
             q_next = self.critic_target.q_min(
                 next_windows, next_wm_features, next_action
             )
-            target_q = rewards + (1.0 - dones) * self.gamma * q_next
+            target_q = rewards + (1.0 - dones) * torch.pow(
+                self.gamma, horizons
+            ) * q_next
         q1, q2 = self.critic(windows, wm_features, actions)
         critic_loss = torch.mean((q1.squeeze(-1) - target_q) ** 2) + torch.mean(
             (q2.squeeze(-1) - target_q) ** 2
@@ -444,6 +447,8 @@ def train_direct_rl(
         int(config.authority_model.history_len),
         0,
         action_dim=DIRECT_ACTION_DIM,
+        n_step=int(getattr(config.rl, "n_step", 1)),
+        gamma=float(config.rl.gamma),
     )
     log(
         f"[direct-rl-train seed={model_seed}] no warmstart "

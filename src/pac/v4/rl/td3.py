@@ -25,10 +25,11 @@ class ReplayBatch:
     windows: torch.Tensor        # (B, L, 24)
     wm_features: torch.Tensor    # (B, W) or (B, 0)
     actions: torch.Tensor        # (B,)
-    rewards: torch.Tensor        # (B,)
-    next_windows: torch.Tensor   # (B, L, 24)
+    rewards: torch.Tensor        # (B,) n-step returns when n_step > 1
+    next_windows: torch.Tensor   # (B, L, 24) state at t + horizon
     next_wm_features: torch.Tensor
     dones: torch.Tensor          # (B,)
+    horizons: torch.Tensor       # (B,) per-row chain length for gamma**h
 
 
 class ReplayBuffer:
@@ -37,14 +38,23 @@ class ReplayBuffer:
     ``action_dim`` is 1 for the residual-alpha policy (scalar delta) and
     6 for the direct-thruster control arm; stored actions are always
     shaped ``(capacity, action_dim)``.
+
+    ``n_step > 1`` enables n-step return aggregation at insertion time:
+    each stored row becomes (s_t, a_t, sum_k gamma^k r_{t+k},
+    s_{t+h}, done_{t+h}, h) with h = min(n_step, episode remainder).
+    Warm-start rows loaded via :meth:`extend` stay 1-step (h = 1), and
+    the per-row ``h`` lets one critic mix both semantics via
+    ``gamma ** h`` bootstrapping.
     """
 
     def __init__(self, capacity: int, history_len: int, wm_feature_dim: int,
-                 action_dim: int = 1):
+                 action_dim: int = 1, n_step: int = 1, gamma: float = 0.99):
         self.capacity = int(capacity)
         self.history_len = int(history_len)
         self.wm_feature_dim = int(wm_feature_dim)
         self.action_dim = int(action_dim)
+        self.n_step = max(1, int(n_step))
+        self.gamma = float(gamma)
         if self.action_dim < 1:
             raise ValueError("action_dim must be >= 1")
         self.windows = np.zeros((self.capacity, self.history_len, 24), dtype=np.float32)
@@ -54,8 +64,33 @@ class ReplayBuffer:
         self.next_windows = np.zeros_like(self.windows)
         self.next_wm_features = np.zeros_like(self.wm_features)
         self.dones = np.zeros(self.capacity, dtype=np.float32)
+        self.horizons = np.ones(self.capacity, dtype=np.float32)
         self.index = 0
         self.size = 0
+        self._pending: list[tuple] = []
+
+    def _write(self, window, wm_features, action, reward,
+               next_window, next_wm_features, done, horizon) -> None:
+        slot = self.index
+        self.windows[slot] = window
+        self.wm_features[slot] = wm_features
+        self.actions[slot] = np.asarray(action, dtype=np.float32).reshape(-1)
+        self.rewards[slot] = float(reward)
+        self.next_windows[slot] = next_window
+        self.next_wm_features[slot] = next_wm_features
+        self.dones[slot] = float(bool(done))
+        self.horizons[slot] = float(horizon)
+        self.index = (self.index + 1) % self.capacity
+        self.size = min(self.size + 1, self.capacity)
+
+    def _flush_chain(self) -> None:
+        """Store the return of the chain starting at _pending[0]."""
+        chain_return = 0.0
+        for offset, entry in enumerate(self._pending):
+            chain_return += (self.gamma ** offset) * entry[3]
+        first, last = self._pending[0], self._pending[-1]
+        self._write(first[0], first[1], first[2], chain_return,
+                    last[4], last[5], last[6], len(self._pending))
 
     def add(
             self,
@@ -66,16 +101,17 @@ class ReplayBuffer:
             next_window: np.ndarray,
             next_wm_features: np.ndarray,
             done: bool) -> None:
-        slot = self.index
-        self.windows[slot] = window
-        self.wm_features[slot] = wm_features
-        self.actions[slot] = np.asarray(action, dtype=np.float32).reshape(-1)
-        self.rewards[slot] = float(reward)
-        self.next_windows[slot] = next_window
-        self.next_wm_features[slot] = next_wm_features
-        self.dones[slot] = float(bool(done))
-        self.index = (self.index + 1) % self.capacity
-        self.size = min(self.size + 1, self.capacity)
+        entry = (window, wm_features, action, float(reward),
+                 next_window, next_wm_features, bool(done))
+        self._pending.append(entry)
+        if entry[6]:  # terminal: flush every remaining truncated chain
+            while self._pending:
+                self._flush_chain()
+                self._pending.pop(0)
+            return
+        if len(self._pending) >= self.n_step:
+            self._flush_chain()
+            self._pending.pop(0)
 
     def extend(self, arrays: dict[str, Any]) -> None:
         """Bulk-load warm-start arrays (windows/actions/... keys)."""
@@ -95,11 +131,13 @@ class ReplayBuffer:
         ).reshape(count, self.action_dim)
         self.rewards[:count] = arrays["rewards"]
         self.dones[:count] = arrays["dones"]
+        self.horizons[:count] = 1.0  # warm-start rows stay 1-step
         if self.wm_feature_dim:
             self.wm_features[:count] = 0.0
             self.next_wm_features[:count] = 0.0
         self.index = count % self.capacity
         self.size = count
+        self._pending = []
 
     def sample(self, batch_size: int, generator: torch.Generator) -> ReplayBatch:
         if self.size < batch_size:
@@ -115,6 +153,7 @@ class ReplayBuffer:
             next_windows=torch.from_numpy(self.next_windows[indices]),
             next_wm_features=torch.from_numpy(self.next_wm_features[indices]),
             dones=torch.from_numpy(self.dones[indices]),
+            horizons=torch.from_numpy(self.horizons[indices]),
         )
 
 
@@ -132,21 +171,25 @@ def _critic_input(
 
 class TwinCritic(nn.Module):
     def __init__(self, history_len: int, wm_feature_dim: int,
-                 hidden_dim: int = 256, action_dim: int = 1):
+                 hidden_dim: int = 256, action_dim: int = 1,
+                 input_norm: bool = False):
         super().__init__()
         # action_dim widens the input (state + action features); the Q
-        # output stays scalar.
+        # output stays scalar.  input_norm prepends a LayerNorm over the
+        # flattened window features (raw magnitudes span decades).
         input_dim = history_len * 24 + wm_feature_dim + int(action_dim)
-        self.q1 = nn.Sequential(
-            nn.Linear(input_dim, hidden_dim), nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim), nn.ReLU(),
-            nn.Linear(hidden_dim, 1),
-        )
-        self.q2 = nn.Sequential(
-            nn.Linear(input_dim, hidden_dim), nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim), nn.ReLU(),
-            nn.Linear(hidden_dim, 1),
-        )
+        def _head():
+            layers: list[nn.Module] = []
+            if input_norm:
+                layers.append(nn.LayerNorm(input_dim))
+            layers.extend([
+                nn.Linear(input_dim, hidden_dim), nn.ReLU(),
+                nn.Linear(hidden_dim, hidden_dim), nn.ReLU(),
+                nn.Linear(hidden_dim, 1),
+            ])
+            return nn.Sequential(*layers)
+        self.q1 = _head()
+        self.q2 = _head()
 
     def forward(self, windows, wm_features, actions):
         state_action = _critic_input(windows, wm_features, actions)
@@ -175,7 +218,8 @@ class TD3Trainer:
             history_len: int,
             wm_feature_dim: int,
             device: torch.device,
-            seed: int):
+            seed: int,
+            critic_input_norm: bool = False):
         self.policy = policy.to(device)
         # The target actor must own an independent copy of the backbone:
         # sharing the module object made the soft update alias target and
@@ -190,8 +234,12 @@ class TD3Trainer:
         self.policy_target.load_state_dict(self.policy.state_dict())
         for parameter in self.policy_target.parameters():
             parameter.requires_grad_(False)
-        self.critic = TwinCritic(history_len, wm_feature_dim).to(device)
-        self.critic_target = TwinCritic(history_len, wm_feature_dim).to(device)
+        self.critic = TwinCritic(
+            history_len, wm_feature_dim, input_norm=bool(critic_input_norm)
+        ).to(device)
+        self.critic_target = TwinCritic(
+            history_len, wm_feature_dim, input_norm=bool(critic_input_norm)
+        ).to(device)
         self.critic_target.load_state_dict(self.critic.state_dict())
         for parameter in self.critic_target.parameters():
             parameter.requires_grad_(False)
@@ -222,6 +270,7 @@ class TD3Trainer:
             next_windows=batch.next_windows.to(self.device),
             next_wm_features=batch.next_wm_features.to(self.device),
             dones=batch.dones.to(self.device),
+            horizons=batch.horizons.to(self.device),
         )
         with torch.no_grad():
             next_alpha, _delta = self.policy_target.raw_alpha(
@@ -239,7 +288,12 @@ class TD3Trainer:
             q_next = self.critic_target.q_min(
                 batch.next_windows, batch.next_wm_features, next_delta_action
             )
-            target_q = batch.rewards + (1.0 - batch.dones) * self.gamma * q_next
+            # per-row gamma**h handles mixed 1-step (warm-start) and
+            # n-step (on-policy) rows in one buffer
+            bootstraps = (1.0 - batch.dones) * torch.pow(
+                self.gamma, batch.horizons
+            ) * q_next
+            target_q = batch.rewards + bootstraps
 
         q1, q2 = self.critic(
             batch.windows, batch.wm_features, batch.actions

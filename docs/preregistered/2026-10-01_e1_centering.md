@@ -199,3 +199,29 @@ Falsifiable expectation: if the smoothness hypothesis is right, p0t15
 approaches the constant-0.5 floor minus dithering (unseen 0.118-0.130)
 and s2rl2 improves on T025's 0.1401; if p0 arms beat s2 arms, the
 backbone-smooth prior dominates the learned conditional shape.
+
+## Stage 5 preregistration (2026-10-08, user-approved optimization fix)
+
+Diagnosis from the training-curve investigation: the 1-step TD target
+propagates an alpha decision's consequence over ~100 bootstrap steps
+(credit assignment), and the raw critic input is unnormalized.  Fix
+(zero protocol change to deployment):
+
+- n-step returns (n=20) aggregated at insertion, per-row horizon h,
+  bootstrap gamma**h (warm-start rows stay h=1);
+- batch 256 -> 1024, updates_per_step 1 -> 2;
+- LayerNorm over the flattened critic input.
+
+Config: pac_v4_s5a.yaml (rl.n_step/critic_input_norm optional fields,
+defaults preserve the frozen protocol bitwise; 28 unit tests incl.
+chain math, done truncation, n=1 legacy semantics).
+
+Smoke (seed 31000, 31.5k steps): reward -0.565 -> -0.491 -- first arm
+with non-declining reward; critic loss bounded/oscillating.
+
+Formal procedure: 5 seeds x 200k steps (runs/predictive_authority_v4/
+s5a), gate = backbone bitwise frozen, then unseen-only selection eval
+(user criterion) against p0t30 (0.1346), constant a0.25 (0.1183), v3
+(0.1612).  Success: unseen <= 0.125.  Falsifiable expectation: if the
+reward rise is more than dithering-tax removal, unseen improves over
+0.1401; if not, S5 confirms the ceiling with cleaner optimization.
