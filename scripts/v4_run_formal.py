@@ -51,6 +51,10 @@ def build_parser() -> argparse.ArgumentParser:
              "policy (Stage 3), e.g. 0.4",
     )
     parser.add_argument(
+        "--squash-center", type=float, default=0.5,
+        help="center of the deployment alpha squash (Stage A/B anchors)",
+    )
+    parser.add_argument(
         "--block-filter", default=None, choices=["seen", "unseen"],
         help="evaluate only one block of the paired grid (compute saver)",
     )
@@ -85,6 +89,7 @@ def main(argv: list[str] | None = None) -> int:
             if arguments.methods else None
         ),
         alpha_squash=arguments.alpha_squash,
+        squash_center=arguments.squash_center,
         block_filter=arguments.block_filter,
         jobs=arguments.jobs,
         resume_from=arguments.resume_from,

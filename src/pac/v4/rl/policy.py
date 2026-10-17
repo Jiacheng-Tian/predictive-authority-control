@@ -60,7 +60,9 @@ class ResidualAlphaPolicy(nn.Module):
             lambda_blend: float,
             hidden_dim: int = 64,
             wm_feature_dim: int = 0,
-            freeze_backbone: bool = True):
+            freeze_backbone: bool = True,
+            base_center: float = 0.5,
+            base_temperature: float = 1.0):
         super().__init__()
         if int(backbone.input_dim) != 24:
             raise ValueError("residual policy requires a 24-dim backbone")
@@ -68,6 +70,11 @@ class ResidualAlphaPolicy(nn.Module):
         self.delta_max = float(delta_max)
         self.lambda_blend = float(lambda_blend)
         self.wm_feature_dim = int(wm_feature_dim)
+        # Conservative anchor applied INSIDE the base alpha (Stage B):
+        # base = c + T*(raw - c).  Defaults (c=0.5, T=1) are the identity
+        # and keep the frozen protocol bitwise unchanged.
+        self.base_center = float(base_center)
+        self.base_temperature = float(base_temperature)
         for parameter in self.backbone.parameters():
             parameter.requires_grad_(not bool(freeze_backbone))
         embed_dim = int(backbone.input_proj.out_features)
@@ -96,10 +103,13 @@ class ResidualAlphaPolicy(nn.Module):
         return encoded[:, -1, :]
 
     def backbone_alpha(self, windows: torch.Tensor) -> torch.Tensor:
-        """Raw backbone alpha (before gain/filter)."""
+        """Anchored base alpha (before gain/filter)."""
         with torch.no_grad():
             embedding = self._embed(windows)
-            return self.backbone.head(embedding).squeeze(-1)
+            raw = self.backbone.head(embedding).squeeze(-1)
+        return self.base_center + self.base_temperature * (
+            raw - self.base_center
+        )
 
     def forward(
             self,
@@ -187,6 +197,8 @@ def save_rl_checkpoint(
         "backbone_checkpoint": str(backbone_checkpoint),
         "delta_max": float(policy.delta_max),
         "lambda_blend": float(policy.lambda_blend),
+        "base_center": float(policy.base_center),
+        "base_temperature": float(policy.base_temperature),
         "wm_feature_dim": int(policy.wm_feature_dim),
         "freeze_backbone": bool(not any(
             p.requires_grad for p in policy.backbone.parameters()
@@ -237,6 +249,8 @@ def load_rl_checkpoint(
         lambda_blend=float(payload["lambda_blend"]),
         wm_feature_dim=int(payload["wm_feature_dim"]),
         freeze_backbone=bool(payload.get("freeze_backbone", True)),
+        base_center=float(payload.get("base_center", 0.5)),
+        base_temperature=float(payload.get("base_temperature", 1.0)),
     )
     policy.load_state_dict(payload["state_dict"], strict=True)
     policy.eval()

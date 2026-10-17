@@ -200,7 +200,8 @@ class MethodFactory:
                  dataset_dir: Path | None, sspo_schedule: dict | None,
                  include_wm_rl: bool, wm_sigma: dict | None = None,
                  direct_rl_dir: Path | None = None, rl_round: int = 1,
-                 alpha_squash: float | None = None):
+                 alpha_squash: float | None = None,
+                 squash_center: float = 0.5):
         self.wm_sigma = wm_sigma
         self.config = config
         self.rl_dir = rl_dir
@@ -214,6 +215,7 @@ class MethodFactory:
         self.alpha_squash = (
             None if alpha_squash is None else float(alpha_squash)
         )
+        self.squash_center = float(squash_center)
         self._cache: dict[tuple, Any] = {}
         self._wm_computer = None
 
@@ -300,7 +302,8 @@ class MethodFactory:
                 from pac.v4.eval.runner import SquashAlphaPolicy
 
                 policy = SquashAlphaPolicy(
-                    policy, temperature=self.alpha_squash
+                    policy, temperature=self.alpha_squash,
+                    center=self.squash_center,
                 )
         else:
             raise ValueError(f"unknown formal method: {method}")
@@ -442,7 +445,8 @@ _WORKER_STATE: dict[str, Any] = {}
 def _worker_initialize(arguments) -> None:
     (config_path, rl_dir, wm_rl_dir, wm_checkpoint, dataset_dir,
      sspo_schedule, include_wm_rl, wm_sigma, direct_rl_dir, rl_round,
-     alpha_sweep, include_direct_rl, methods, alpha_squash) = arguments
+     alpha_sweep, include_direct_rl, methods, alpha_squash,
+     squash_center) = arguments
     import torch
 
     torch.set_num_threads(1)
@@ -460,6 +464,7 @@ def _worker_initialize(arguments) -> None:
         direct_rl_dir=Path(direct_rl_dir) if direct_rl_dir else None,
         rl_round=int(rl_round),
         alpha_squash=alpha_squash,
+        squash_center=float(squash_center),
     )
     _WORKER_STATE["combos"] = method_grid(
         config,
@@ -499,6 +504,7 @@ def run_v4_formal(
         rl_round: int = 1,
         methods: list[str] | tuple[str, ...] | None = None,
         alpha_squash: float | None = None,
+        squash_center: float = 0.5,
         block_filter: str | None = None,
         log: Callable[[str], None] = lambda message: None) -> Path | dict[str, Any]:
     """Run the paired formal v4 grid; returns the run directory.
@@ -605,6 +611,7 @@ def run_v4_formal(
                 int(rl_round), bool(alpha_sweep), bool(include_direct_rl),
                 list(methods) if methods else None,
                 float(alpha_squash) if alpha_squash is not None else None,
+                float(squash_center),
             )
             partial_rows_path = temporary / "partial_rows.jsonl"
             if resumed_rows:
@@ -644,6 +651,7 @@ def run_v4_formal(
                 rl_round=int(rl_round),
                 alpha_squash=(float(alpha_squash)
                               if alpha_squash is not None else None),
+                squash_center=float(squash_center),
             )
             for task in tasks:
                 spec = build_task_spec(config, task)
@@ -712,6 +720,7 @@ def run_v4_formal(
             "alpha_squash": (
                 float(alpha_squash) if alpha_squash is not None else None
             ),
+            "squash_center": float(squash_center),
             "block_filter": block_filter,
             "direct_rl_dir": (
                 str(Path(direct_rl_dir).resolve()) if direct_rl_dir else None

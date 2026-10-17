@@ -99,6 +99,8 @@ def train_residual_rl(
             lambda_blend=float(rl.lambda_blend),
             wm_feature_dim=wm_dim,
             freeze_backbone=bool(rl.freeze_backbone_round1),
+            base_center=float(getattr(rl, "base_center", 0.5)),
+            base_temperature=float(getattr(rl, "base_temperature", 1.0)),
         )
         if round_index != 1:
             unfreeze_round2_blocks(policy, rl.unfreeze_blocks_round2)
@@ -124,8 +126,14 @@ def train_residual_rl(
 
     dataset_hash = dataset_content_hash(dataset_dir)
     dataset = load_transition_dataset(dataset_dir)
+    from pac.v4.rl.anchor import AnchoredBackbone
+    warmstart_backbone = AnchoredBackbone(
+        policy.backbone,
+        center=float(getattr(rl, "base_center", 0.5)),
+        temperature=float(getattr(rl, "base_temperature", 1.0)),
+    )
     warmstart = materialize_warmstart(
-        dataset, config, policy.backbone, limit=int(rl.warmstart_transitions)
+        dataset, config, warmstart_backbone, limit=int(rl.warmstart_transitions)
     )
     total_steps = int(max_env_steps or rl.max_steps_per_round)
     capacity = max(int(rl.warmstart_transitions), total_steps) + 4096

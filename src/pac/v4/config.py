@@ -201,6 +201,10 @@ class RLConfig:
     # the flattened critic input.
     n_step: int = 1
     critic_input_norm: bool = False
+    # Stage B conservative anchor on the residual base alpha
+    # (defaults are the identity / frozen protocol).
+    base_center: float = 0.5
+    base_temperature: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -527,9 +531,15 @@ def _load_rl(data: dict[str, Any]) -> RLConfig:
         ),
         n_step=_int_value(section.get("n_step", 1), "rl.n_step"),
         critic_input_norm=bool(section.get("critic_input_norm", False)),
+        base_center=_float_value(section.get("base_center", 0.5), "rl.base_center"),
+        base_temperature=_float_value(section.get("base_temperature", 1.0), "rl.base_temperature"),
     )
     if config.n_step < 1:
         raise ValueError("rl.n_step must be >= 1")
+    if not 0.0 <= config.base_center <= 1.0:
+        raise ValueError("rl.base_center must be in [0, 1]")
+    if not 0.0 < config.base_temperature <= 1.0:
+        raise ValueError("rl.base_temperature must be in (0, 1]")
     if not 0.0 < config.delta_max <= 1.0:
         raise ValueError("rl.delta_max must be in (0, 1]")
     if config.lambda_blend < 0.0 or config.behavior_reg < 0.0:
