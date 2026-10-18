@@ -1,0 +1,28 @@
+{
+  "anchor": {
+    "center": 0.25,
+    "temperature": 0.3
+  },
+  "baselines": {
+    "constant_alpha_0.25": {
+      "seen": 0.0713,
+      "unseen": 0.1183
+    },
+    "supervised_transformer": {
+      "seen": 0.0635,
+      "unseen": 0.1612
+    },
+    "unanchored_residual": {
+      "seen": 0.0656,
+      "unseen": 0.1539
+    }
+  },
+  "ci_basis": "model-seed level paired effects, t(4)",
+  "episodes": 120,
+  "method": "Residual PAC + conservative deployment anchor",
+  "model_seeds": 5,
+  "rmse_3d": {
+    "seen": 0.0648,
+    "unseen": 0.1151
+  }
+}

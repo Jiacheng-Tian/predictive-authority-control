@@ -6,11 +6,10 @@
       "seen": 85,
       "unseen": 35
     },
-    "episodes": 60,
+    "episodes": 120,
     "method_seed_combos": 24,
     "profile": "formal",
-    "resumed_rows": 1440,
-    "rollouts": 1440
+    "rollouts": 2880
   },
   "preregistered_comparisons": [
     "residual_rl_vs_v3_transformer",
@@ -22,6 +21,6 @@
   "profile": "formal",
   "protocol_version": "predictive_authority_v4",
   "raw_rows": 2880,
-  "run_id": "formal-stage2-baseline-r3",
+  "run_id": "formal-stage2-fixed-r1",
   "status": "complete"
 }

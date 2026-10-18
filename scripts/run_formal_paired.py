@@ -45,6 +45,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="comma-separated method subset to evaluate (e.g. "
              "constant_alpha_0.25,constant_alpha_0.75 for the alpha sweep)",
     )
+    parser.add_argument(
+        "--no-deployment-anchor", action="store_true",
+        help="disable the released default conservative anchor "
+             "(reproduces the un-anchored corrected-protocol tables)",
+    )
+    parser.add_argument("--alpha-squash", type=float, default=None,
+                        help="override the anchor temperature (default 0.30)")
+    parser.add_argument("--squash-center", type=float, default=0.25)
     parser.add_argument("--jobs", type=int, default=1)
     parser.add_argument(
         "--resume-from", default=None,
@@ -75,6 +83,9 @@ def main(argv: list[str] | None = None) -> int:
             [name.strip() for name in arguments.methods.split(",") if name.strip()]
             if arguments.methods else None
         ),
+        anchor_deployment=not arguments.no_deployment_anchor,
+        alpha_squash=arguments.alpha_squash,
+        squash_center=arguments.squash_center,
         jobs=arguments.jobs,
         resume_from=arguments.resume_from,
         progress_every=arguments.progress_every,

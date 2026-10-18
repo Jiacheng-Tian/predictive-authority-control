@@ -153,6 +153,40 @@ class TransformerAlphaPolicy:
         return alpha_raw
 
 
+
+class SquashAlphaPolicy:
+    """Deployment-time conservative anchor on another policy's raw alpha.
+
+    ``alpha' = center + temperature * (alpha - center)`` applied before
+    the shared gain/filter stack.  The released default deployment uses
+    center=0.25, temperature=0.30 (see ERRATA.md and README): it keeps
+    30% of the learned policy's relative judgement while anchoring the
+    absolute level near the conservative blending point.
+    """
+
+    def __init__(self, policy, temperature: float, center: float = 0.25):
+        if not 0.0 < float(temperature) <= 1.0:
+            raise ValueError("squash temperature must be in (0, 1]")
+        if not 0.0 <= float(center) <= 1.0:
+            raise ValueError("squash center must be in [0, 1]")
+        self.policy = policy
+        self.temperature = float(temperature)
+        self.center = float(center)
+
+    @property
+    def uses_wm(self) -> bool:
+        return bool(getattr(self.policy, "uses_wm", False))
+
+    direct_action = False
+
+    def reset(self, spec, episode_end: float) -> None:
+        self.policy.reset(spec, episode_end)
+
+    def select_alpha(self, context) -> float:
+        alpha_raw = float(self.policy.select_alpha(context))
+        return self.center + self.temperature * (alpha_raw - self.center)
+
+
 def build_backbone_policy(config, model_seed: int, *,
                           alpha_bias_schedule=None) -> TransformerAlphaPolicy:
     """Load one frozen supervised backbone checkpoint as a v4 policy."""
@@ -591,6 +625,7 @@ def run_residual_policy_episode(
 __all__ = [
     "ConstantAlphaPolicy",
     "FixedControllerPolicy",
+    "SquashAlphaPolicy",
     "StepContext",
     "TransformerAlphaPolicy",
     "ResidualPolicy",

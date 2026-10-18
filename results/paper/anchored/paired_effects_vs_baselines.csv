@@ -1,0 +1,7 @@
+comparison,block,mean_difference,ci95_low,ci95_high,verdict
+anchored_vs_constant_0.25,seen,-0.0065,-0.0072,-0.0058,significant
+anchored_vs_constant_0.25,unseen,-0.0032,-0.0042,-0.0022,significant
+anchored_vs_supervised_transformer,seen,0.0013,0.0002,0.0024,significant
+anchored_vs_supervised_transformer,unseen,-0.0461,-0.0736,-0.0186,significant
+unanchored_vs_supervised_transformer,seen,0.0021,-0.0016,0.0059,ns
+unanchored_vs_supervised_transformer,unseen,-0.0073,-0.0302,0.0156,ns

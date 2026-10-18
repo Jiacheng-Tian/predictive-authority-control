@@ -199,7 +199,10 @@ class MethodFactory:
                  wm_checkpoint: Path | None,
                  dataset_dir: Path | None, sspo_schedule: dict | None,
                  include_wm_rl: bool, wm_sigma: dict | None = None,
-                 direct_rl_dir: Path | None = None, rl_round: int = 1):
+                 direct_rl_dir: Path | None = None, rl_round: int = 1,
+                 anchor_deployment: bool = True,
+                 alpha_squash: float | None = None,
+                 squash_center: float = 0.25):
         self.wm_sigma = wm_sigma
         self.config = config
         self.rl_dir = rl_dir
@@ -210,6 +213,14 @@ class MethodFactory:
         self.include_wm_rl = include_wm_rl
         self.direct_rl_dir = direct_rl_dir
         self.rl_round = int(rl_round)
+        # Released default deployment: the residual stack is anchored at
+        # alpha = 0.25 + 0.30*(alpha - 0.25) unless explicitly disabled
+        # (--no-deployment-anchor reproduces the un-anchored tables).
+        self.anchor_deployment = bool(anchor_deployment)
+        self.alpha_squash = (
+            None if alpha_squash is None else float(alpha_squash)
+        )
+        self.squash_center = float(squash_center)
         self._cache: dict[tuple, Any] = {}
         self._wm_computer = None
 
@@ -280,6 +291,16 @@ class MethodFactory:
             from pac.residual.rl.collect import LiveResidualPolicy
 
             policy = LiveResidualPolicy(policy, explore_std=0.0, seed=0)
+            temperature = self.alpha_squash
+            if temperature is None and self.anchor_deployment:
+                temperature = 0.30
+            if temperature is not None:
+                from pac.residual.eval.runner import SquashAlphaPolicy
+
+                policy = SquashAlphaPolicy(
+                    policy, temperature=temperature,
+                    center=self.squash_center,
+                )
         else:
             raise ValueError(f"unknown formal method: {method}")
         self._cache[key] = policy
@@ -420,7 +441,8 @@ _WORKER_STATE: dict[str, Any] = {}
 def _worker_initialize(arguments) -> None:
     (config_path, rl_dir, wm_rl_dir, wm_checkpoint, dataset_dir,
      sspo_schedule, include_wm_rl, wm_sigma, direct_rl_dir, rl_round,
-     alpha_sweep, include_direct_rl, methods) = arguments
+     alpha_sweep, include_direct_rl, methods, anchor_deployment,
+     alpha_squash, squash_center) = arguments
     import torch
 
     torch.set_num_threads(1)
@@ -437,6 +459,9 @@ def _worker_initialize(arguments) -> None:
         wm_sigma=wm_sigma,
         direct_rl_dir=Path(direct_rl_dir) if direct_rl_dir else None,
         rl_round=int(rl_round),
+        anchor_deployment=bool(anchor_deployment),
+        alpha_squash=alpha_squash,
+        squash_center=float(squash_center),
     )
     _WORKER_STATE["combos"] = method_grid(
         config,
@@ -475,6 +500,9 @@ def run_paired_formal(
         direct_rl_dir: str | Path | None = None,
         rl_round: int = 1,
         methods: list[str] | tuple[str, ...] | None = None,
+        anchor_deployment: bool = True,
+        alpha_squash: float | None = None,
+        squash_center: float = 0.25,
         log: Callable[[str], None] = lambda message: None) -> Path | dict[str, Any]:
     """Run the paired formal v4 grid; returns the run directory.
 
@@ -574,6 +602,9 @@ def run_paired_formal(
                 str(Path(direct_rl_dir).resolve()) if direct_rl_dir else None,
                 int(rl_round), bool(alpha_sweep), bool(include_direct_rl),
                 list(methods) if methods else None,
+                bool(anchor_deployment),
+                float(alpha_squash) if alpha_squash is not None else None,
+                float(squash_center),
             )
             partial_rows_path = temporary / "partial_rows.jsonl"
             if resumed_rows:
@@ -611,6 +642,9 @@ def run_paired_formal(
                 direct_rl_dir=(Path(direct_rl_dir).resolve()
                                if direct_rl_dir else None),
                 rl_round=int(rl_round),
+                anchor_deployment=bool(anchor_deployment),
+                alpha_squash=alpha_squash,
+                squash_center=float(squash_center),
             )
             for task in tasks:
                 spec = build_task_spec(config, task)
@@ -676,6 +710,12 @@ def run_paired_formal(
             "alpha_sweep": bool(alpha_sweep),
             "include_direct_rl": bool(include_direct_rl),
             "methods_override": list(methods) if methods else None,
+            "deployment_anchor": {
+                "enabled": bool(anchor_deployment and (alpha_squash is None or alpha_squash > 0)),
+                "temperature": (float(alpha_squash) if alpha_squash is not None
+                                else (0.30 if anchor_deployment else None)),
+                "center": float(squash_center),
+            },
             "direct_rl_dir": (
                 str(Path(direct_rl_dir).resolve()) if direct_rl_dir else None
             ),
