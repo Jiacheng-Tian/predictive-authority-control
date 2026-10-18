@@ -17,21 +17,33 @@ decides *how much to trust each controller* at every step:
 The complete learning system is 16,290 parameters (≈64 KB), small enough for
 embedded deployment.
 
-## Headline results
+## Headline results (v1.0.1, corrected)
 
 Paired, simulation-only evaluation over 120 episodes across eight disturbance
-families (see [docs/evaluation_protocol.md](docs/evaluation_protocol.md)):
+families (see [docs/evaluation_protocol.md](docs/evaluation_protocol.md)).
+**v1.0.0 shipped checkpoints affected by a TD3 target-network bug — see
+[ERRATA.md](ERRATA.md); all numbers below use the corrected protocol.**
 
-| Comparison | Supervised PAC | Residual PAC |
-|---|---|---|
-| Out-of-distribution RMSE | 0.161 m | **0.116 m (−28%)** |
-| Actuator-degradation RMSE | 0.295 m | **0.090 m (−69%)** |
-| In-distribution RMSE | **0.064 m** | 0.066 m (+4.4%) |
+The released default deployment anchors the residual stack's authority
+coefficient conservatively — `alpha' = 0.25 + 0.30 * (alpha - 0.25)` —
+keeping 30% of the learned relative judgement while holding the absolute
+level near the safe blending point:
 
-The in-distribution cost is disclosed deliberately: the residual stage trades
-a small in-distribution regression for a large out-of-distribution gain.
-Full tables and per-family breakdowns are shipped in
-[results/paper](results/paper).
+| RMSE-3D | Supervised PAC | Residual PAC (unanchored) | **Residual PAC (anchored, default)** |
+|---|---|---|---|
+| Out-of-distribution | 0.161 m | 0.154 m | **0.115 m (−28.6%, significant)** |
+| In-distribution | **0.064 m** | 0.066 m | 0.065 m |
+| Actuator-degradation (OOD) | 0.302 m | 0.305 m | **0.087 m** |
+
+The anchored residual significantly dominates the strongest fixed-blending
+baseline (constant alpha=0.25: 0.071/0.118 m) on **both** blocks
+(model-seed level paired t(4) CIs exclude zero; see
+[results/paper/anchored](results/paper/anchored)). Without the anchor, the
+residual stage does **not** significantly improve on the supervised baseline
+on either block — the v1.0.0 claim of −28%/−69% was an artifact of the bug
+described in the erratum. Full corrected tables:
+[results/paper](results/paper) (unanchored), 
+[results/paper/anchored](results/paper/anchored) (default deployment).
 
 ## Installation
 
@@ -59,6 +71,9 @@ given the recorded seeds and refuse to overwrite existing outputs.
    ```bash
    python scripts/train_residual_rl.py         # constrained TD3, one seed per call
    python scripts/run_formal_paired.py         # 120-episode paired grid
+                                                # (default deployment: conservative
+                                                #  anchor; --no-deployment-anchor
+                                                #  reproduces the unanchored tables)
    python scripts/verify_backbone_frozen.py    # asserts backbone stayed frozen
    python scripts/summarize_formal_results.py  # tables from a run directory
    ```
